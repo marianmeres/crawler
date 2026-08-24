@@ -21,6 +21,7 @@ const ROOT_EXPORTS = [
 	// ./url, re-exported for convenience
 	"classifyLink",
 	"getRegistrableDomain",
+	"hostsAreSameSite",
 	"isSameSite",
 	"normalizeUrl",
 ];
@@ -44,6 +45,7 @@ const URL_EXPORTS = [
 	"SECOND_LEVEL_LABELS",
 	"classifyLink",
 	"getRegistrableDomain",
+	"hostsAreSameSite",
 	"isSameSite",
 	"normalizeUrl",
 ];

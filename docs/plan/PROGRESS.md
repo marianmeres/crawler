@@ -41,7 +41,7 @@ Branch: `sprint-01-foundations`, continued.
 | # | Task | Source | Status | Commit |
 |---|------|--------|--------|--------|
 | 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ✅ | `TBD9` |
-| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ⬜ | |
+| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ✅ | `TBD10` |
 | 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ⬜ | |
 
 ## Backlog (ranked, post-sprint)
@@ -386,6 +386,52 @@ Branch: `sprint-01-foundations`, continued.
   no checkout normalizes `robots/bom-crlf.txt`'s CRLFs out of existence. Separately, the
   raw NUL byte in three test sources is now written `\u0000`: git classified those files
   as binary, so their diffs were unreviewable. (task 9)
+
+- **2026-08-24** — `hostsAreSameSite(a, b, opts)` joins `./url`'s public surface and
+  `isSameSite` is redefined as `hostnameOf` × it. Scope evaluation compares one target
+  against a set of seed *hostnames* once per discovered link, and the alternatives were
+  both bad: synthesising a `https://${host}/` string per seed per link, or copying
+  `isSameSite`'s mode switch — including the monotone no-registrable-domain fallback,
+  which is exactly the subtlety a copy would drift on. Comparison inputs are normalized
+  defensively (lowercased, root label dropped) so a hostname out of a config file
+  compares like one out of `URL.hostname`. (task 10, touches task 2's file)
+
+- **2026-08-24** — `evaluateScope`'s context is wider than doc 02's sketch: it also takes
+  `rel`, `nofollow`, `allowPrivateHosts` and `getRegistrableDomain`. The doc's own check
+  order needs all four (steps 2, 5 and 7 are spelled in terms of them), and they are all
+  pure — leaving them out would have pushed three of the seven synchronous checks back
+  into the engine, which is the opposite of why this function exists. The accepted
+  verdict also carries `checkOnly`, which the function has already computed and the
+  engine would otherwise derive again. (task 10)
+
+- **2026-08-24** — **`exclude` applies to every URL; `include` and `pathPrefix` only
+  narrow the crawl's own site.** A deny-list must never be bypassable, but an allow-list
+  that also filtered externals would silently kill `checkExternal`: nobody's external
+  links start with your `pathPrefix`, so a broken-link check would check nothing and
+  report a wall of `out-of-scope`. Doc 02 lists all three under one step without saying
+  which side of the external gate they sit on; this is that call. (task 10)
+
+- **2026-08-24** — An **empty string in `include`/`exclude` contributes nothing**.
+  `href.includes("")` is `true`, so a stray empty entry — the classic split-an-env-var
+  accident — would otherwise exclude the entire web, or disable an allow-list, with no
+  error message. Same call `./extract` makes about an empty `Allow:` line (task 7).
+  (task 10)
+
+- **2026-08-24** — Two refinements to doc 02's `unsupported-type` step. It applies to
+  every **document** rel (`page`, `canonical`, `next`, `prev`, `sitemap`), not only
+  `page` — a `<link rel=next href=/x.zip>` is exactly as unfetchable — while `asset`,
+  `iframe` and `alternate` stay exempt, because those sources are opt-in and a caller who
+  turned them on asked for those URLs. And a **check-only external is exempt entirely**:
+  the deny-list exists so a crawler does not download a 4 GB `.mkv` looking for links in
+  it, and a `checkExternal` fetch retains no body, so the waste it guards against cannot
+  happen — while the links most likely to be broken are precisely the big binaries.
+  (task 10)
+
+- **2026-08-24** — `evaluateScope` re-checks the scheme and rejects anything but
+  `http:`/`https:` as `bad-scheme`, even though the engine has already normalized. The
+  transport is HTTP whatever `normalize.allowSchemes` was widened to keep in the graph,
+  so this is a transport fact rather than a duplicated policy — and it makes the function
+  correct standalone, which is what makes it exhaustively testable. (task 10)
 
 ## How to resume (for a fresh conversation)
 

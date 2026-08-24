@@ -126,17 +126,29 @@ export function getRegistrableDomain(host: string): string | null {
 }
 
 /**
- * Hostname of a URL-ish value, or `null` when it has none (unparsable, or opaque).
- * The DNS root label is dropped, matching what `normalizeUrl` writes into the
+ * A hostname as this module compares them: lowercased, with the DNS root label
+ * dropped. Dropping the root label matches what `normalizeUrl` writes into the
  * frontier — otherwise `https://a.com./x` would be off-site from `https://a.com/x`.
+ *
+ * Not a regex: `/\.+$/` backtracks on a long run of dots, and a hostile `href` is
+ * attacker-controlled input on every crawl.
+ */
+function normalizeHost(host: string): string {
+	if (typeof host !== "string" || host === "") return "";
+	let end = host.length;
+	while (end > 0 && host.charCodeAt(end - 1) === 0x2e) end--;
+	return (end === 0 ? host : host.slice(0, end)).toLowerCase();
+}
+
+/**
+ * Hostname of a URL-ish value, or `null` when it has none (unparsable, or opaque),
+ * normalized per {@linkcode normalizeHost}.
  */
 function hostnameOf(value: string | URL): string | null {
 	try {
 		const url = value instanceof URL ? value : new URL(String(value));
-		if (url.hostname === "") return null;
-		let end = url.hostname.length;
-		while (end > 0 && url.hostname.charCodeAt(end - 1) === 0x2e) end--;
-		return end === 0 ? url.hostname : url.hostname.slice(0, end);
+		const host = normalizeHost(url.hostname);
+		return host === "" ? null : host;
 	} catch {
 		return null;
 	}
@@ -190,6 +202,42 @@ export function isSameSite(
 	const hostA = hostnameOf(a);
 	const hostB = hostnameOf(b);
 	if (hostA === null || hostB === null) return false;
+	return hostsAreSameSite(hostA, hostB, opts);
+}
+
+/**
+ * {@linkcode isSameSite} on two *hostnames* rather than two URLs — `"a.com"`, not
+ * `"https://a.com/x"`.
+ *
+ * This is the primitive `isSameSite` is defined in terms of, and it exists because a
+ * crawler compares one target against a set of seed hostnames once per discovered
+ * link: holding the hosts and skipping the URL parse is the difference between a
+ * comparison and a parse on that path.
+ *
+ * Inputs are normalized defensively (lowercased, trailing root label dropped), so the
+ * `hostname` of a `URL`, a hand-written `"A.com."` and a value out of a config file
+ * all compare the same way. An empty host is never the same site as anything,
+ * including another empty host.
+ *
+ * The mode semantics — including the monotone fallback for a host with no registrable
+ * domain, and the defensive treatment of an injected resolver — are exactly
+ * {@linkcode isSameSite}'s; see there.
+ *
+ * @example
+ * ```ts
+ * hostsAreSameSite("a.com", "a.com");                                   // => true
+ * hostsAreSameSite("a.com", "blog.a.com");                              // => false
+ * hostsAreSameSite("a.com", "blog.a.com", { subdomains: "same-site" }); // => true
+ * ```
+ */
+export function hostsAreSameSite(
+	a: string,
+	b: string,
+	opts?: SameSiteOptions,
+): boolean {
+	const hostA = normalizeHost(a);
+	const hostB = normalizeHost(b);
+	if (hostA === "" || hostB === "") return false;
 
 	switch (opts?.subdomains) {
 		case "any":

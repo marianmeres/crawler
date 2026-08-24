@@ -22,6 +22,7 @@ export type { NormalizeOptions } from "./normalize-url.ts";
 export {
 	classifyLink,
 	getRegistrableDomain,
+	hostsAreSameSite,
 	isSameSite,
 	SECOND_LEVEL_LABELS,
 } from "./same-site.ts";

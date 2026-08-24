@@ -2,6 +2,7 @@ import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
 	classifyLink,
 	getRegistrableDomain,
+	hostsAreSameSite,
 	isSameSite,
 	SECOND_LEVEL_LABELS,
 } from "../../src/url/same-site.ts";
@@ -221,5 +222,79 @@ Deno.test("isSameSite: an injected resolver cannot break the contract", async (t
 				`junk resolver made two hosts same-site`,
 			);
 		}
+	});
+});
+
+Deno.test("hostsAreSameSite: the primitive isSameSite is built on", async (t) => {
+	await t.step("it agrees with isSameSite on every mode", () => {
+		const pairs: [string, string][] = [
+			["a.com", "a.com"],
+			["a.com", "blog.a.com"],
+			["a.com", "b.com"],
+			["a.co.uk", "blog.a.co.uk"],
+			["co.uk", "a.co.uk"],
+			["localhost", "localhost"],
+			["localhost", "other"],
+			["127.0.0.1", "127.0.0.1"],
+			["[::1]", "[::1]"],
+			["a.com", "a.com."],
+			["A.com", "a.com"],
+		];
+		for (const mode of ["same-host", "same-site", "any"] as const) {
+			for (const [a, b] of pairs) {
+				assertEquals(
+					hostsAreSameSite(a, b, { subdomains: mode }),
+					isSameSite(`https://${a}/x`, `https://${b}/y`, {
+						subdomains: mode,
+					}),
+					`${mode}: ${a} vs ${b}`,
+				);
+			}
+		}
+	});
+
+	await t.step("an empty host is never the same site as anything", () => {
+		assertFalse(hostsAreSameSite("", ""));
+		assertFalse(hostsAreSameSite("", "a.com"));
+		assertFalse(hostsAreSameSite("a.com", ""));
+		assertFalse(hostsAreSameSite("", "", { subdomains: "any" }));
+		// deno-lint-ignore no-explicit-any
+		assertFalse(hostsAreSameSite(null as any, "a.com"));
+	});
+
+	await t.step(
+		"inputs are normalized, so a config-file host compares correctly",
+		() => {
+			assert(hostsAreSameSite("A.COM.", "a.com"));
+			assert(hostsAreSameSite("a.com..", "a.com"));
+		},
+	);
+
+	await t.step("it is reflexive and symmetric under every mode", () => {
+		const hosts = ["a.com", "blog.a.com", "co.uk", "localhost", "127.0.0.1"];
+		for (const mode of ["same-host", "same-site", "any"] as const) {
+			for (const a of hosts) {
+				assert(hostsAreSameSite(a, a, { subdomains: mode }), `${mode} ${a}`);
+				for (const b of hosts) {
+					assertEquals(
+						hostsAreSameSite(a, b, { subdomains: mode }),
+						hostsAreSameSite(b, a, { subdomains: mode }),
+						`${mode}: ${a} vs ${b}`,
+					);
+				}
+			}
+		}
+	});
+
+	await t.step("an injected resolver is honored, and honored defensively", () => {
+		const opts = {
+			subdomains: "same-site" as const,
+			getRegistrableDomain: (host: string) =>
+				host.endsWith(".github.io") ? host : null,
+		};
+		assertFalse(hostsAreSameSite("alice.github.io", "bob.github.io", opts));
+		assert(hostsAreSameSite("alice.github.io", "alice.github.io", opts));
+		// null for both falls back to host equality, never to "equal"
+		assertFalse(hostsAreSameSite("a.com", "b.com", opts));
 	});
 });
