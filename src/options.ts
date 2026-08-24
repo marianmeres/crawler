@@ -165,7 +165,8 @@ function nonNegativeInteger(
  * which `./extract` would silently replace with its default), or a strategy with no way
  * to sort (`"priority"` without a `priority` function). Everything else is the caller's
  * business. Durations, delays and byte budgets are deliberately *not* required to be
- * whole — half a millisecond is a coherent thing to ask for.
+ * whole — half a millisecond is a coherent thing to ask for, and neither is
+ * {@linkcode CrawlOptions.maxDepth}, whose `0` means "the seeds and nothing else".
  *
  * @throws {TypeError} on an out-of-range number, a fractional count, or on
  * `strategy: "priority"` without a `priority` function.
@@ -210,7 +211,10 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 		maxQueued: positiveInteger(options.maxQueued, "maxQueued") ?? 100_000,
 
 		// budgets — absent means unbounded
-		maxDepth: positiveInteger(options.maxDepth, "maxDepth") ?? Infinity,
+		// (maxDepth is the one count where `0` is a coherent request rather than a
+		// mistake: "the seeds and nothing else". Depth 0 is a page that gets crawled,
+		// so zero here is the tightest limit, not the absence of one.)
+		maxDepth: nonNegativeInteger(options.maxDepth, "maxDepth") ?? Infinity,
 		maxPages: positiveInteger(options.maxPages, "maxPages") ?? Infinity,
 		maxDuration: positive(options.maxDuration, "maxDuration") ?? Infinity,
 		maxTotalBytes: positive(options.maxTotalBytes, "maxTotalBytes") ?? Infinity,

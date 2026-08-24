@@ -225,6 +225,9 @@ export interface CrawlOptions {
 	 * Prune expansion beyond this link distance. Deeper links are skipped with
 	 * `"max-depth"`; the crawl still ends as `"completed"` — depth prunes, it does not
 	 * stop a run. Default: unlimited.
+	 *
+	 * `0` is legal and means "the seeds and nothing else" — unlike every other cap
+	 * here, where `0` is rejected. A depth of zero is a page that gets crawled.
 	 */
 	maxDepth?: number;
 	/** Stop after this many completed fetches (successes + failures). Default: unlimited. */
@@ -391,7 +394,13 @@ export interface PageContext {
 	 * **This is the body access path.** {@linkcode PageResult} never carries a body.
 	 */
 	fetchResult?: FetchResult;
-	/** Live stats snapshot at the moment this page completed. */
+	/**
+	 * Live stats snapshot taken as this page completed.
+	 *
+	 * The page itself is **not** counted in it yet — it is still part of `inFlight`,
+	 * because whether it lands in `done` or in `failed` is not settled until
+	 * {@linkcode CrawlOptions.onPage} has run and either returned or thrown.
+	 */
 	stats: CrawlStats;
 }
 

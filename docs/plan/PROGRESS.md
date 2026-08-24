@@ -48,11 +48,11 @@ Branch: `sprint-01-foundations`, continued.
 
 Branch: `sprint-01-foundations`, continued.
 
-| #  | Task                                                                        | Source                                | Status | Commit  |
-| -- | --------------------------------------------------------------------------- | ------------------------------------- | ------ | ------- |
-| 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5         | ✅     | `TBD12` |
-| 13 | Fake-`FetchFn` helper + mini-site + engine tests                            | [05](./05-testing-docs-release.md) #3 | ⬜     |         |
-| 14 | robots.txt enforcement gate + directives                                    | [02](./02-crawl-engine.md) #4         | ⬜     |         |
+| #  | Task                                                                        | Source                                | Status | Commit    |
+| -- | --------------------------------------------------------------------------- | ------------------------------------- | ------ | --------- |
+| 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5         | ✅     | `abf175b` |
+| 13 | Fake-`FetchFn` helper + mini-site + engine tests                            | [05](./05-testing-docs-release.md) #3 | ✅     | `TBD13`   |
+| 14 | robots.txt enforcement gate + directives                                    | [02](./02-crawl-engine.md) #4         | ⬜     |           |
 
 ## Backlog (ranked, post-sprint)
 
@@ -577,12 +577,67 @@ Branch: `sprint-01-foundations`, continued.
 - **2026-08-24** — Three more test defects from the same review, each fixed and each
   worth naming because they are the failure modes a test suite hides behind:
   `script-noise.html`'s "a `<` that is arithmetic" step asserted a title that is parsed
-  *before* the `<script>` it claimed to be about (it now asserts the link list, which
+  _before_ the `<script>` it claimed to be about (it now asserts the link list, which
   actually depends on the raw-text skip); `conflicting-precedence.txt`'s "an unmatched
   path is allowed" used `/plain`, which matches `/p` and is allowed for a completely
   different reason; and removing the `MAX_REGION_DEPTH` guard outright survived the whole
   suite, so the cap now has a boundary test (the 64th landmark counts, the 65th does
   not). (task 9, follow-up)
+
+- **2026-08-24** — Doc 05 §3 lists five engine test files; three land now and two are
+  **deferred to the ranks that make them writable**: `crawler-limits.test.ts` needs
+  `maxPages`/`maxDuration`/`maxTotalBytes` (rank 16) and `crawler-events.test.ts` needs
+  the event call sites (rank 15). The parts of that second file that are _not_ about
+  events — `stop()` drains, `abort()`/`signal` cancel, `dispose()` — are engine
+  lifecycle and are in `crawler.test.ts` now. `crawler-scope-robots.test.ts` lands with
+  its scope, region and `beforeExtract` half; the robots half is rank 14. (task 13)
+
+- **2026-08-24** — `SMALL_SITE` is doc 05 §3's twelve entries verbatim, and the
+  region/`beforeExtract` suites use their own small `MiniSite`s rather than growing it.
+  Those cases need landmark markup, `<div class="main">` soup and a `<base href>` — put
+  on `SMALL_SITE` they would change the BFS order, the depth map and the dedupe counts
+  that every other assertion in the package is written against. `FakePage` gained two
+  fields doc 05 did not spell but its own text requires ("never sleeps and never throws
+  unless a step is scripted to"): `delayMs` (signal-aware, so an abort test can cancel
+  mid-flight) and `error`. (task 13)
+
+- **2026-08-24** — Engine suites pass `robots: { respect: false }` explicitly, even
+  while the gate does not exist. Two reasons: the assertions stay valid across rank 14
+  instead of being rewritten by it, and an engine test that also depends on a robots
+  verdict is testing two things at once. The default-on path is `crawler-scope-robots`'s
+  job. (task 13)
+
+- **2026-08-24** — **`maxDepth: 0` was rejected, and should not be.** Task 4's rule —
+  every `> 0` knob rejects `0` rather than reading it as "unlimited" — was applied to
+  `maxDepth` too, which made "crawl exactly these seeds, follow nothing" unexpressible
+  except via `shouldVisit: () => false`. The rule's rationale does not survive contact
+  with a _depth_: `0` is a page that gets crawled, so zero is the tightest limit rather
+  than the absence of one. `maxDepth` is now the single count validated as `>= 0`. Found
+  by the task-13 suite. (task 13, touches task 4's file)
+
+- **2026-08-24** — A page is **counted after `onPage` has run**, not before. `onPage` is
+  documented as running before the page is yielded and its throw FAILS the page, so
+  whether the page lands in `done` or in `failed` is not settled until the hook has had
+  its say — counting first meant a hook-failed page was reported as a success. The
+  visible consequence is now documented on `PageContext.stats`: the page itself is not
+  in that snapshot yet (it is still part of `inFlight`). Found by the task-13 suite.
+  (task 13)
+
+- **2026-08-24** — A seed and an `add()`ed URL are evaluated with
+  `regionsPresent: false`. Without it, `scope.followRegions` rejected the seed itself as
+  `out-of-region` — a seed has no landmark because it was never found in a document —
+  and the crawl fetched literally nothing. Reusing the whole-document fallback says
+  exactly the right thing ("this URL did not come from regioned markup") instead of
+  special-casing the option away. Found by the task-13 suite. (task 13)
+
+- **2026-08-24** — `stop()`/`abort()`/`dispose()` racing `run()`'s startup: shutdown
+  could latch, drain and finalize _while_ `#start` was still enqueuing seeds, after
+  which `#start` went on to set `dispatching = true` and launch the loop — resurrecting
+  a crawl that had already reported its final `stoppedBy`. Startup is now a tracked
+  promise that shutdown awaits, and `#start` returns without dispatching if a shutdown
+  latched while it ran. Found by the task-13 suite (it deadlocked the run rather than
+  failing an assertion, which is how the whole file came to be run one test at a time).
+  (task 13)
 
 ## How to resume (for a fresh conversation)
 

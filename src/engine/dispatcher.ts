@@ -142,6 +142,7 @@ export class CrawlEngine {
 	#aborting = false;
 	#stoppedBy: StoppedBy | undefined;
 	#stoppedReason: string | undefined;
+	#startPromise: Promise<void> | undefined;
 	#shutdownPromise: Promise<void> | undefined;
 	#finalizePromise: Promise<void> | undefined;
 	#report: CrawlReport | undefined;
@@ -282,7 +283,8 @@ export class CrawlEngine {
 		this.#channel = channel;
 
 		try {
-			await this.#start(seeds);
+			this.#startPromise = this.#start(seeds);
+			await this.#startPromise;
 			while (true) {
 				const next = await channel.next();
 				if (next.done) break;
@@ -326,6 +328,11 @@ export class CrawlEngine {
 
 		for (const url of normalized) await this.#enqueueSeed(url);
 
+		// `stop()`, `abort()` or `dispose()` can land while the seeds are still being
+		// enqueued — starting the dispatcher after that point would resurrect a crawl
+		// that has already been shut down and finalized
+		if (this.#shutdownPromise !== undefined) return;
+
 		this.#dispatching = true;
 		this.#loop = this.#dispatch();
 		// a loop failure is a crawl failure: surface it on the iterator rather than as
@@ -367,6 +374,12 @@ export class CrawlEngine {
 
 			if (stoppedBy === "abort") this.#abortController.abort(reason);
 
+			// startup owns `#loop`, so it has to settle before we can wait on it
+			try {
+				await this.#startPromise;
+			} catch {
+				// already reported through the channel
+			}
 			try {
 				await this.#loop;
 			} catch {
@@ -427,11 +440,16 @@ export class CrawlEngine {
 
 			// nothing eligible: either the crawl is finished, or everything is behind
 			// a politeness window or an in-flight page
-			if (
-				this.#globalInFlight === 0 && this.#manual.length === 0 &&
-				(await this.#frontier.size()) === 0
-			) {
-				break;
+			if (this.#globalInFlight === 0 && this.#manual.length === 0) {
+				const pending = await this.#frontier.size();
+				// re-read: `add()` is synchronous from the consumer's side and can
+				// land during the await above
+				if (
+					pending === 0 && this.#globalInFlight === 0 &&
+					this.#manual.length === 0
+				) {
+					break;
+				}
 			}
 			await this.#park(this.#nextWakeDelay(Date.now()));
 		}
@@ -639,13 +657,6 @@ export class CrawlEngine {
 		result.timing.extract = Date.now() - extractStartedAt;
 		result.timing.total = result.timing.fetch + result.timing.extract;
 
-		this.#stats.recordPage({
-			ok: result.ok,
-			status: result.status,
-			host: item.host,
-			size: result.size,
-		});
-
 		const ctx: PageContext = {
 			crawlId: this.crawlId,
 			requestId: result.requestId,
@@ -663,6 +674,17 @@ export class CrawlEngine {
 				result.ok = false;
 			}
 		}
+
+		// counted only now: `onPage` is documented as running before the page is
+		// yielded, and a hook that throws FAILS the page — so whether this one lands in
+		// `done` or in `failed` is not settled until the hook has had its say. (Which
+		// is also why `ctx.stats` above does not include it: it is still `inFlight`.)
+		this.#stats.recordPage({
+			ok: result.ok,
+			status: result.status,
+			host: item.host,
+			size: result.size,
+		});
 
 		if (this.#opts.collect.pages) this.#pages.push(result);
 		await this.#channel!.push(result);
@@ -951,6 +973,9 @@ export class CrawlEngine {
 		const verdict = evaluateScope(entry.url, {
 			...this.#scopeContext(),
 			kind: isOnSeedSite(host, this.#scopeContext()) ? "internal" : "external",
+			// a URL nobody found in a document has no region; that is exactly what the
+			// whole-document fallback is for
+			regionsPresent: false,
 		});
 		if (!verdict.follow) return verdict.reason;
 
@@ -980,6 +1005,7 @@ export class CrawlEngine {
 			...ctx,
 			scope: { ...ctx.scope, include: [], pathPrefix: [] },
 			kind: "internal",
+			regionsPresent: false,
 		});
 		if (!verdict.follow) {
 			this.#stats.recordSkip(verdict.reason);

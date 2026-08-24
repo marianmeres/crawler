@@ -195,7 +195,6 @@ Deno.test("resolveCrawlOptions() — caps must be > 0, and Infinity means unlimi
 		"concurrency",
 		"perHostConcurrency",
 		"maxQueued",
-		"maxDepth",
 		"maxPages",
 		"maxDuration",
 		"maxTotalBytes",
@@ -215,6 +214,23 @@ Deno.test("resolveCrawlOptions() — caps must be > 0, and Infinity means unlimi
 			resolveCrawlOptions({ [key]: Infinity })[key],
 			Infinity,
 			`${key}: Infinity should be accepted`,
+		);
+	}
+});
+
+Deno.test("resolveCrawlOptions() — maxDepth is the one count where 0 is meaningful", () => {
+	// "the seeds and nothing else": depth 0 is a page that gets crawled, so zero here
+	// is the tightest limit rather than the absence of one
+	assertEquals(resolveCrawlOptions({ maxDepth: 0 }).maxDepth, 0);
+	assertEquals(resolveCrawlOptions({ maxDepth: Infinity }).maxDepth, Infinity);
+	assertEquals(resolveCrawlOptions({}).maxDepth, Infinity);
+
+	for (const bad of [-1, NaN, 1.5]) {
+		assertThrows(
+			() => resolveCrawlOptions({ maxDepth: bad }),
+			TypeError,
+			"options.maxDepth",
+			`maxDepth: ${bad} should have been rejected`,
 		);
 	}
 });
