@@ -30,9 +30,9 @@ stacks on that branch rather than starting a new one off `main`.
 
 | # | Task | Source | Status | Commit |
 |---|------|--------|--------|--------|
-| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ✅ | `pending-6` |
-| 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ✅ | `pending-7` |
-| 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ✅ | `pending-8` |
+| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ✅ | `4c5cd07` |
+| 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ✅ | `4f7a2a5` |
+| 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ✅ | `0914574` |
 
 ## Backlog (ranked, post-sprint)
 
