@@ -31,12 +31,12 @@ stacks on that branch rather than starting a new one off `main`.
 | # | Task | Source | Status | Commit |
 |---|------|--------|--------|--------|
 | 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ✅ | `pending-6` |
+| 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ✅ | `pending-7` |
 
 ## Backlog (ranked, post-sprint)
 
 | Rank | Task | Source | Status |
 |------|------|--------|--------|
-| 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ⬜ |
 | 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ⬜ |
 | 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ⬜ |
 | 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ⬜ |
@@ -273,6 +273,28 @@ stacks on that branch rather than starting a new one off `main`.
   swallow the document; `<a href=/>` is an href of `"/"`, not a self-closing tag. An
   empty href is dropped, a fragment-only href (`#top`) is kept — filtering belongs to
   scope, and normalization already turns it into the page's own URL. (task 6)
+
+- **2026-08-24** — The robots matcher is a **hand-written two-pointer glob**, not the
+  regex compilation doc 01 item 4 specs. `*` → `[\s\S]*` in a backtracking engine is a
+  denial-of-service any site can trigger: `Disallow: /a*a*a*a*a*a*a*a*b` against a long
+  path explores every way to split the path between the stars before reporting no match.
+  The two-pointer matcher is O(pattern x path) worst case, needs no metacharacter
+  escaping pass (a `(` in a path is just a character), and is pinned by a timing test.
+  Same class of finding as task 3's quadratic-regex entry. (task 7)
+
+- **2026-08-24** — `isAllowed(pathAndQuery, ua)` is tolerant about its first argument: a
+  whole URL is reduced to `pathname + search`, a missing leading `/` is added, a fragment
+  is dropped, and an empty/non-string target reads as `/`. Passing a full URL is the
+  obvious caller mistake, and the untolerant reading answers "allowed" for every URL on
+  the site — failing open, silently. (task 7)
+
+- **2026-08-24** — Robots details doc 01 left open: an empty `Allow:` contributes nothing
+  (same as the spec'd empty `Disallow:`) — an empty allow pattern would match everything
+  and cancel the rest of the file; within one group the FIRST `Crawl-delay` wins, and
+  across several groups addressing one agent the LARGEST does (being slower than asked is
+  never a violation); only `Allow`/`Disallow`/`Crawl-delay` end a group's `User-agent`
+  block, so a stray `Host:` between two `User-agent:` lines does not split the group.
+  (task 7)
 
 ## How to resume (for a fresh conversation)
 

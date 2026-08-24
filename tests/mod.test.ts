@@ -31,6 +31,9 @@ const EXTRACT_EXPORTS = [
 	"extractBaseHref",
 	"extractLinks",
 	"extractTitle",
+	"parseRobotsTxt",
+	"robotsAllowAll",
+	"robotsDisallowAll",
 ];
 
 const URL_EXPORTS = [

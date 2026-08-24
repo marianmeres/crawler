@@ -6,8 +6,13 @@
  * together with the sectioning landmark it sits in. {@linkcode extractTitle} and
  * {@linkcode extractBaseHref} share the same scanner.
  *
- * Everything here is total: malformed markup yields fewer results, never an exception,
- * because a crawler meets malformed markup on a normal day.
+ * {@linkcode parseRobotsTxt} shares the submodule's contract without sharing the
+ * scanner: it turns a robots.txt into an inspectable structure plus a compiled path
+ * matcher, and ships the allow-all / disallow-all values the crawl loop's fetch policy
+ * needs.
+ *
+ * Everything here is total: malformed input yields fewer results, never an exception,
+ * because a crawler meets malformed input on a normal day.
  *
  * The export list is explicit rather than an `export *` — the scanner in `_html.ts` is
  * internal, and a wildcard is how internals become public promises.
@@ -23,6 +28,9 @@ export {
 	extractTitle,
 } from "./extract-links.ts";
 export type { ExtractLinksOptions } from "./extract-links.ts";
+
+export { parseRobotsTxt, robotsAllowAll, robotsDisallowAll } from "./robots-txt.ts";
+export type { RobotsGroup, RobotsRule, RobotsTxt } from "./robots-txt.ts";
 
 export type {
 	ExtractOptions,
