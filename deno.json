@@ -43,8 +43,6 @@
 		"lineWidth": 90,
 		"indentWidth": 4,
 		"proseWrap": "preserve",
-		"exclude": [
-			"tests/fixtures/"
-		]
+		"exclude": ["tests/fixtures/"]
 	}
 }
