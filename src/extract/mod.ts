@@ -6,10 +6,11 @@
  * together with the sectioning landmark it sits in. {@linkcode extractTitle} and
  * {@linkcode extractBaseHref} share the same scanner.
  *
- * {@linkcode parseRobotsTxt} shares the submodule's contract without sharing the
- * scanner: it turns a robots.txt into an inspectable structure plus a compiled path
- * matcher, and ships the allow-all / disallow-all values the crawl loop's fetch policy
- * needs.
+ * The robots half is here too: {@linkcode parseRobotsTxt} turns a robots.txt into an
+ * inspectable structure plus a compiled path matcher (and ships the allow-all /
+ * disallow-all values the crawl loop's fetch policy needs), while
+ * {@linkcode parseMetaRobots} and {@linkcode parseXRobotsTag} read the per-page
+ * directives that decide whether a page's links may be followed.
  *
  * Everything here is total: malformed input yields fewer results, never an exception,
  * because a crawler meets malformed input on a normal day.
@@ -31,6 +32,9 @@ export type { ExtractLinksOptions } from "./extract-links.ts";
 
 export { parseRobotsTxt, robotsAllowAll, robotsDisallowAll } from "./robots-txt.ts";
 export type { RobotsGroup, RobotsRule, RobotsTxt } from "./robots-txt.ts";
+
+export { parseMetaRobots, parseXRobotsTag } from "./meta-robots.ts";
+export type { RobotsDirectives } from "./meta-robots.ts";
 
 export type {
 	ExtractOptions,

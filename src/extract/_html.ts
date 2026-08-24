@@ -243,8 +243,9 @@ const ATTR_RE = /([^\s"'>/=]+)\s*(?:=\s*("[^"]*"|'[^']*'|[^\s>]+))?/g;
  * Attributes of a tag body, lowercased, entity-decoded and unquoted.
  *
  * First occurrence wins (`<a href=a href=b>` is `a`, as in every browser), a valueless
- * attribute maps to `""`, and the result is a `Map` rather than an object so that an
- * attribute literally named `__proto__` cannot reach an object prototype.
+ * attribute maps to `""`, an unterminated quoted value keeps whatever text it had, and
+ * the result is a `Map` rather than an object so that an attribute literally named
+ * `__proto__` cannot reach an object prototype.
  */
 export function parseAttrs(attrsSource: string): Map<string, string> {
 	const out = new Map<string, string>();
@@ -257,11 +258,12 @@ export function parseAttrs(attrsSource: string): Map<string, string> {
 		if (out.has(name)) continue;
 		let value = m[2] ?? "";
 		const q = value.charCodeAt(0);
-		if (
-			value.length > 1 && (q === 0x22 || q === 0x27) &&
-			value.charCodeAt(value.length - 1) === q
-		) {
-			value = value.slice(1, -1);
+		if (q === 0x22 || q === 0x27) {
+			// a value whose closing quote never arrived (the tag ran into EOF) is the
+			// text after the quote, not the quote itself
+			value = value.length > 1 && value.charCodeAt(value.length - 1) === q
+				? value.slice(1, -1)
+				: value.slice(1);
 		}
 		out.set(name, decodeEntities(value));
 	}

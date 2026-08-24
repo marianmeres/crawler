@@ -32,12 +32,12 @@ stacks on that branch rather than starting a new one off `main`.
 |---|------|--------|--------|--------|
 | 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ✅ | `pending-6` |
 | 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ✅ | `pending-7` |
+| 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ✅ | `pending-8` |
 
 ## Backlog (ranked, post-sprint)
 
 | Rank | Task | Source | Status |
 |------|------|--------|--------|
-| 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ⬜ |
 | 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ⬜ |
 | 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ⬜ |
 | 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ⬜ |
@@ -295,6 +295,19 @@ stacks on that branch rather than starting a new one off `main`.
   never a violation); only `Allow`/`Disallow`/`Crawl-delay` end a group's `User-agent`
   block, so a stray `Host:` between two `User-agent:` lines does not split the group.
   (task 7)
+
+- **2026-08-24** — `X-Robots-Tag` details doc 01 left to implementation: a `botname:`
+  group runs until the NEXT group starts (Google's own examples read that way), so the
+  `Headers.get()` join of `googlebot: nofollow` + `noindex` attributes the unscoped
+  `noindex` to googlebot — lossy, unavoidable after joining, documented on the function.
+  Scope matching reuses the robots.txt rule (the group token is a case-insensitive
+  substring of `botName`), so `googlebot` addresses `googlebot/2.1`; with no `botName`
+  only unscoped directives apply. `raw` holds only tokens that APPLIED. (task 8)
+
+- **2026-08-24** — `parseAttrs` on a quoted attribute value whose closing quote never
+  arrives (the tag ran into EOF) keeps the text after the quote, not the quote character.
+  Found by a `parseMetaRobots("<meta name=robots content=\"")` test, which was reporting
+  a directive token of `"`. (task 8, touches task 6's file)
 
 ## How to resume (for a fresh conversation)
 

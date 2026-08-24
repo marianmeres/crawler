@@ -182,6 +182,8 @@ Deno.test("extractLinks: attribute soup", async (t) => {
 
 	await t.step("a tag unterminated at EOF still yields its href", () => {
 		assertEquals(hrefs(`<a href="/eof"`), ["/eof"]);
+		assertEquals(hrefs(`<a href="/unclosed-quote`), ["/unclosed-quote"]);
+		assertEquals(hrefs(`<a href="`), []);
 	});
 
 	await t.step("a stray < is text", () => {

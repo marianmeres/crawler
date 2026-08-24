@@ -31,7 +31,9 @@ const EXTRACT_EXPORTS = [
 	"extractBaseHref",
 	"extractLinks",
 	"extractTitle",
+	"parseMetaRobots",
 	"parseRobotsTxt",
+	"parseXRobotsTag",
 	"robotsAllowAll",
 	"robotsDisallowAll",
 ];
