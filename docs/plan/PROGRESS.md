@@ -7,8 +7,7 @@ A fresh conversation should read this file first, then the relevant `NN-*.md` se
 
 > Convention: one branch per sprint, one commit per task. Each task resolves its source
 > doc's "Open questions" first (record in the Decisions log), then implement → test →
-> tick here. NOTE: the repo has no commits yet — EXECUTE step zero is committing the
-> scaffold + this plan on `master`, then branching.
+> tick here. Step zero (scaffold + plan committed on `master`, then branching) is done.
 
 ## First sprint (foundations — normalize semantics + contracts + packaging)
 
@@ -16,9 +15,9 @@ Branch: `sprint-01-foundations`
 
 | # | Task | Source | Status | Commit |
 |---|------|--------|--------|--------|
-| 1 | `normalizeUrl` pipeline + `NormalizeOptions` | [01](./01-url-and-extraction.md) #3 | ✅ | — |
-| 2 | `isSameSite` + registrable-domain heuristic + `classifyLink` | [01](./01-url-and-extraction.md) #1 | ✅ | — |
-| 3 | `./url` unit-test corpora (incl. idempotency property test) | [01](./01-url-and-extraction.md) #5 | ✅ | — |
+| 1 | `normalizeUrl` pipeline + `NormalizeOptions` | [01](./01-url-and-extraction.md) #3 | ✅ | `ff0abf6` |
+| 2 | `isSameSite` + registrable-domain heuristic + `classifyLink` | [01](./01-url-and-extraction.md) #1 | ✅ | `04ed377` |
+| 3 | `./url` unit-test corpora (incl. idempotency property test) | [01](./01-url-and-extraction.md) #5 | ✅ | `7a37b9e` |
 | 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1 | ⬜ | — |
 | 5 | deno.json: exports map, imports, publish exclude, test task | [05](./05-testing-docs-release.md) #1 | ⬜ | — |
 
