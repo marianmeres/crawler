@@ -18,8 +18,11 @@ Branch: `sprint-01-foundations`
 | 1 | `normalizeUrl` pipeline + `NormalizeOptions` | [01](./01-url-and-extraction.md) #3 | ✅ | `ff0abf6` |
 | 2 | `isSameSite` + registrable-domain heuristic + `classifyLink` | [01](./01-url-and-extraction.md) #1 | ✅ | `04ed377` |
 | 3 | `./url` unit-test corpora (incl. idempotency property test) | [01](./01-url-and-extraction.md) #5 | ✅ | `7a37b9e` |
-| 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1 | ⬜ | — |
-| 5 | deno.json: exports map, imports, publish exclude, test task | [05](./05-testing-docs-release.md) #1 | ⬜ | — |
+| 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1 | ✅ | *(uncommitted)* |
+| 5 | deno.json: exports map, imports, publish exclude, test task | [05](./05-testing-docs-release.md) #1 | ✅ | *(uncommitted)* |
+
+Sprint 1 is complete. Next up is backlog rank 6 (`extractLinks`), which is what makes
+`./extract` a real export-map entry.
 
 ## Backlog (ranked, post-sprint)
 
@@ -141,6 +144,50 @@ Branch: `sprint-01-foundations`
   robots 5xx = disallow-all; same-site via heuristic + injectable PSL override; sketch
   §13 open questions adopted as suggested (canonical recorded, redirect-as-attribute,
   nearest-seed depth, pluggable priority, skips-as-events).
+
+- **2026-08-24** — The `exports` map (and the self-referencing `imports` entries) ship
+  only the submodules that EXIST. Doc 05 item 1 specs six keys; `./extract`, `./pg` and
+  `./steve` point at files that are not written, and a dangling exports target fails both
+  `deno check` and `deno publish`. The map grows one entry per submodule as it lands —
+  today `.`, `./url`, `./stores`. (task 5)
+- **2026-08-24** — Dependencies enter `imports` when the first line of code imports them,
+  not up front. Doc 05 item 1 also lists `pg`, `@types/pg`, `@marianmeres/steve` and
+  `@std/testing`; nothing references them yet, so they would only sit in `deno.lock`
+  ahead of the tasks that pick them. `@marianmeres/clog` is not needed at all on the
+  Deno/JSR side — `Logger` reaches us re-exported through page-fetcher. (The npm build
+  still needs clog spelled out for the emitted `.d.ts`; that is task 35.) (task 5)
+- **2026-08-24** — The store CONTRACTS ship with task 4, their memory implementations
+  with task 11. `CrawlOptions.stores`, `CrawlOptions.priority` and `PageContext.item`
+  cannot be spelled without `FrontierStore`/`VisitedStore`/`FrontierItem`, so doc 02
+  item 3's `src/stores/types.ts` is part of "the public API surface" by construction.
+  Same reasoning put `ExtractOptions` in `src/extract/types.ts` ahead of doc 01 item 6 —
+  `CrawlOptions.extract` needs it, and task 6 will import it rather than move it. (task 4)
+- **2026-08-24** — `src/options.ts` (`resolveCrawlOptions`) added; not in doc 02's file
+  list. The defaults documented on `CrawlOptions` ARE the contract, and a contract no
+  code executes drifts from the behavior — so they live in one resolver, and the whole
+  default table is a single test assertion. It also moves validation to construction
+  time: `createCrawler({ concurrency: 0 })` is a `TypeError` rather than a crawl that
+  quietly dispatches nothing. Tasks 10/12 consume the `Resolved*Options` shapes it
+  defines (`pathPrefix` always an array, unset budgets/caps as `Infinity`). (task 4)
+- **2026-08-24** — A cap of `0` is REJECTED, never read as "unlimited". Doc 02 item 8
+  says so for `TrapOptions`; extended to every `> 0` knob (concurrency, maxQueued, the
+  four budgets, `scope.maxUrlLength`, `extract.maxLinks`, `robots.maxBytes`). `Infinity`
+  is how "no limit" is spelled. Delays and intervals are the exception — `0` is
+  meaningful there, negatives are not. (task 4)
+- **2026-08-24** — `crawl()` DEFAULTS `collect` to `{pages: true, graph: true}` instead
+  of forcing it as doc 02 item 1 spells it. Identical for the documented use; the
+  difference is that `crawl(seeds, { collect: { graph: false } })` now saves the graph
+  memory instead of being silently overridden. (task 4)
+- **2026-08-24** — `src/url/mod.ts` re-exports an explicit list, not `export *`. The
+  wildcard was pushing `canonPercentEncoding` — marked `@internal — exported for tests
+  only` — into the published `.` and `./url` surfaces. Each `mod.ts` now has a test
+  pinning its exact runtime export list, so the next accidental leak fails CI rather
+  than shipping. (task 4, touches task 3's file)
+- **2026-08-24** — The `Crawler` shells throw a uniform, greppable "not implemented yet"
+  from every engine-backed member, EXCEPT `[Symbol.asyncDispose]`, which resolves:
+  disposal releases engine-owned fetchers and a crawler that never ran owns none, so
+  that one is correct rather than stubbed. Half-working crawl semantics would be worse
+  than a throw. (task 4)
 
 ## How to resume (for a fresh conversation)
 

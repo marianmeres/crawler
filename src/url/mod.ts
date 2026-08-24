@@ -6,8 +6,23 @@
  * {@linkcode isSameSite}, {@linkcode classifyLink}). It imports nothing, never throws,
  * and is usable entirely standalone.
  *
+ * The export list is explicit rather than a `export *`: `normalize-url.ts` also exports
+ * one helper marked `@internal` for its own tests, and that must not reach consumers.
+ *
  * @module
  */
 
-export * from "./normalize-url.ts";
-export * from "./same-site.ts";
+export {
+	DEFAULT_ALLOW_SCHEMES,
+	DEFAULT_STRIP_PARAMS,
+	normalizeUrl,
+} from "./normalize-url.ts";
+export type { NormalizeOptions } from "./normalize-url.ts";
+
+export {
+	classifyLink,
+	getRegistrableDomain,
+	isSameSite,
+	SECOND_LEVEL_LABELS,
+} from "./same-site.ts";
+export type { SameSiteOptions, SubdomainsMode } from "./same-site.ts";
