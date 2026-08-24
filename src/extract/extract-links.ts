@@ -94,17 +94,21 @@ const NO_RELS: ReadonlySet<string> = new Set<string>();
  * Options are never a reason to throw here — this function is documented as total, and
  * the engine's `resolveCrawlOptions` is where a nonsensical value is an error. An
  * out-of-range number falls back to the default.
+ *
+ * The result is a whole number (`Infinity` included): these caps size and index arrays,
+ * and `links.length = 0.5` is a `RangeError`, not a small cap. A value that floors to
+ * `0` is out of range like any other zero.
  */
 function positiveOr(value: number | undefined, fallback: number): number {
-	return typeof value === "number" && !Number.isNaN(value) && value > 0
-		? value
-		: fallback;
+	if (typeof value !== "number" || Number.isNaN(value) || value <= 0) return fallback;
+	const whole = Math.floor(value);
+	return whole > 0 ? whole : fallback;
 }
 
+/** Same, but `0` is meaningful — it is how anchor-text collection is turned off. */
 function nonNegativeOr(value: number | undefined, fallback: number): number {
-	return typeof value === "number" && !Number.isNaN(value) && value >= 0
-		? value
-		: fallback;
+	if (typeof value !== "number" || Number.isNaN(value) || value < 0) return fallback;
+	return Math.floor(value);
 }
 
 /** Whitespace- and comma-separated `rel` tokens, lowercased. */

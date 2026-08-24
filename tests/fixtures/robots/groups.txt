@@ -1,0 +1,20 @@
+# consecutive User-agent lines open ONE group
+User-agent: badbot
+User-agent: otherbot
+Disallow: /
+
+# a directive that is not a rule does not split a group
+User-agent: alpha
+Host: example.com
+User-agent: beta
+Disallow: /shared/
+
+User-agent: *
+Disallow: /private/
+
+# two groups naming the same agent are unioned by the matcher
+User-agent: mybot
+Disallow: /one/
+
+User-agent: mybot
+Disallow: /two/

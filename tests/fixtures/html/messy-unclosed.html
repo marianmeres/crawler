@@ -1,0 +1,15 @@
+<html>
+<body>
+<p>5 < 6 and 7 > 3 &mdash; a stray < is text, not a tag
+<a href=/unquoted class=x>unquoted attribute values</a>
+<a href='/single' >single-quoted, with a space before the greater-than</a>
+<A HREF="/UPPER">uppercase tag and attribute name</A>
+<a href="/first" href="/second">a duplicate attribute: the first one wins</a>
+<a href="/gt>inside" title="a > b">a quoted &gt; does not end the tag</a>
+<a href=a"b>a quote where no value can start is part of the value</a>
+<a href=/>a slash as the whole value is an href, not a self-closing tag</a>
+<a href = "/spaced" >spaces around the equals sign</a>
+<a href="/dup-in-soup" data-x data-y="1" DATA-X="2" href>valueless attributes</a>
+<div><span><a href="/unclosed-parents">parents that never close
+<p>free-floating text
+<a href="/at-eof" title="the tag runs into the end of the file

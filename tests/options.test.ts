@@ -4,7 +4,7 @@ import {
 	resolveCrawlOptions,
 	type ResolvedCrawlOptions,
 } from "../src/options.ts";
-import type { LinkRegion } from "../src/mod.ts";
+import type { CrawlOptions, LinkRegion } from "../src/mod.ts";
 
 /**
  * The whole default table in one assertion. If a documented default on `CrawlOptions`
@@ -267,4 +267,70 @@ Deno.test("resolveCrawlOptions() — nested caps are validated too", () => {
 		TypeError,
 		"options.robots.maxBytes",
 	);
+});
+
+Deno.test("resolveCrawlOptions() — a count has to be a whole number", async (t) => {
+	await t.step("a fractional count is a TypeError, not a silent default", () => {
+		// `extract.maxLinks: 0.5` used to pass validation, reach ./extract, fail its
+		// own range check there and come back as 10_000 — the opposite of the ask,
+		// with no error anywhere
+		const bad: [CrawlOptions, string][] = [
+			[{ concurrency: 2.5 }, "concurrency"],
+			[{ perHostConcurrency: 1.5 }, "perHostConcurrency"],
+			[{ maxQueued: 10.5 }, "maxQueued"],
+			[{ maxDepth: 1.5 }, "maxDepth"],
+			[{ maxPages: 99.9 }, "maxPages"],
+			[{ scope: { maxUrlLength: 2048.5 } }, "scope.maxUrlLength"],
+			[{ extract: { maxLinks: 0.5 } }, "extract.maxLinks"],
+			[{ extract: { maxAnchorText: 2.7 } }, "extract.maxAnchorText"],
+			[{ robots: { maxBytes: 1.5 } }, "robots.maxBytes"],
+			[{ traps: { maxSegmentRepeat: 3.5 } }, "traps.maxSegmentRepeat"],
+			[{ traps: { maxPathDepth: 20.5 } }, "traps.maxPathDepth"],
+			[{ traps: { maxQueryParams: 32.5 } }, "traps.maxQueryParams"],
+			[{ traps: { maxUrlsPerPath: 200.5 } }, "traps.maxUrlsPerPath"],
+			[{ traps: { softDupThreshold: 10.5 } }, "traps.softDupThreshold"],
+		];
+		for (const [options, name] of bad) {
+			assertThrows(
+				() => resolveCrawlOptions(options),
+				TypeError,
+				`options.${name} must be a whole number`,
+			);
+		}
+	});
+
+	await t.step("Infinity is still how 'no limit' is spelled", () => {
+		const resolved = resolveCrawlOptions({
+			maxDepth: Infinity,
+			maxPages: Infinity,
+			extract: { maxLinks: Infinity },
+		});
+		assertEquals(resolved.maxDepth, Infinity);
+		assertEquals(resolved.maxPages, Infinity);
+		assertEquals(resolved.extract.maxLinks, Infinity);
+	});
+
+	await t.step("time and byte quantities may be fractional", () => {
+		// half a millisecond is a coherent thing to ask for; half a link is not
+		const resolved = resolveCrawlOptions({
+			perHostDelay: 0.5,
+			maxDuration: 1500.5,
+			maxTotalBytes: 1024.5,
+			progressInterval: 250.5,
+			robots: { crawlDelayCap: 1500.5 },
+		});
+		assertEquals(resolved.perHostDelay, 0.5);
+		assertEquals(resolved.maxDuration, 1500.5);
+		assertEquals(resolved.maxTotalBytes, 1024.5);
+		assertEquals(resolved.progressInterval, 250.5);
+		assertEquals(resolved.robots.crawlDelayCap, 1500.5);
+	});
+
+	await t.step("`extract.maxAnchorText: 0` is still meaningful", () => {
+		assertEquals(
+			resolveCrawlOptions({ extract: { maxAnchorText: 0 } })
+				.extract.maxAnchorText,
+			0,
+		);
+	});
 });

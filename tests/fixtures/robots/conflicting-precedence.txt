@@ -1,0 +1,8 @@
+User-agent: *
+Disallow: /p
+Allow: /p
+Disallow: /docs/
+Allow: /docs/public/
+Disallow: /docs/public/secret/
+Allow: /*.html$
+Disallow: /admin/

@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>base href</title>
+<base target="_blank">
+<base href="/base/">
+<base href="/second-base/">
+<link rel="canonical" href="c.html">
+</head>
+<body>
+<a href="rel.html">a relative link written after the base</a>
+<a href="/abs.html">root-relative, unaffected by the base path</a>
+<a href="https://other.org/x">absolute, unaffected entirely</a>
+<base href="/too-late/">
+<a href="after.html">written after the late base</a>
+</body>
+</html>

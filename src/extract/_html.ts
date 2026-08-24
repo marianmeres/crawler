@@ -307,6 +307,23 @@ function decodeOne(body: string): string | undefined {
 const MAX_ENTITY_LENGTH = 12;
 
 /**
+ * Index of the `;` that could close an entity opening at `amp`, or `-1`.
+ *
+ * The search is bounded by {@linkcode MAX_ENTITY_LENGTH}, and that bound is the whole
+ * point: a plain `text.indexOf(";", amp + 1)` scans to the end of the document for
+ * every `&` that is not an entity, which makes a query string of 200 000 bare
+ * ampersands quadratic — seconds of blocked event loop, from an `href` any site can
+ * serve. Anything past the bound was going to be rejected anyway.
+ */
+function entityEnd(text: string, amp: number): number {
+	const limit = Math.min(text.length, amp + 1 + MAX_ENTITY_LENGTH);
+	for (let k = amp + 1; k < limit; k++) {
+		if (text.charCodeAt(k) === 0x3b) return k; // ";"
+	}
+	return -1;
+}
+
+/**
  * Decode the handful of HTML entities that actually matter to a crawler: the five
  * XML-ish names, `&nbsp;`, and numeric references. Everything else is left verbatim —
  * an undecoded `&hellip;` in anchor text is cosmetic, while a wrong `&amp;` in an href
@@ -325,10 +342,8 @@ export function decodeEntities(text: string): string {
 		}
 		out += text.slice(i, amp);
 
-		const semi = text.indexOf(";", amp + 1);
-		const decoded = semi < 0 || semi - amp > MAX_ENTITY_LENGTH
-			? undefined
-			: decodeOne(text.slice(amp + 1, semi));
+		const semi = entityEnd(text, amp);
+		const decoded = semi < 0 ? undefined : decodeOne(text.slice(amp + 1, semi));
 
 		if (decoded === undefined) {
 			out += "&";

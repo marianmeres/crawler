@@ -118,16 +118,57 @@ function nonNegative(value: number | undefined, name: string): number | undefine
 }
 
 /**
+ * A cap that counts things, so it must be whole.
+ *
+ * `Infinity` passes — it is still how "no limit" is spelled — but `2.5` does not. A
+ * fractional count has no meaning anywhere it is used (it either sizes an array, bounds
+ * a loop, or gates a comparison against an integer), and the alternative to rejecting
+ * it is silently rounding on the caller's behalf: `extract.maxLinks: 0.5` would reach
+ * `./extract`, fail its own range check, and come back as the default `10_000` — the
+ * opposite of what was asked for, with no error anywhere.
+ */
+function positiveInteger(
+	value: number | undefined,
+	name: string,
+): number | undefined {
+	const positiveValue = positive(value, name);
+	if (positiveValue === undefined) return undefined;
+	if (positiveValue !== Infinity && !Number.isInteger(positiveValue)) {
+		throw new TypeError(
+			`[crawler] options.${name} must be a whole number (got ${value})`,
+		);
+	}
+	return positiveValue;
+}
+
+/** {@linkcode positiveInteger}, for the caps where `0` is meaningful. */
+function nonNegativeInteger(
+	value: number | undefined,
+	name: string,
+): number | undefined {
+	const nonNegativeValue = nonNegative(value, name);
+	if (nonNegativeValue === undefined) return undefined;
+	if (nonNegativeValue !== Infinity && !Number.isInteger(nonNegativeValue)) {
+		throw new TypeError(
+			`[crawler] options.${name} must be a whole number (got ${value})`,
+		);
+	}
+	return nonNegativeValue;
+}
+
+/**
  * Apply every documented default and validate the numeric knobs.
  *
  * Validation is deliberately narrow — it catches the mistakes that would otherwise
  * turn into a crawl that quietly does nothing (`concurrency: 0`), a cap that reads as
- * its own opposite (`maxUrlsPerPath: 0`), or a strategy with no way to sort
- * (`"priority"` without a `priority` function). Everything else is the caller's
- * business.
+ * its own opposite (`maxUrlsPerPath: 0`), a count that cannot be one (`maxLinks: 0.5`,
+ * which `./extract` would silently replace with its default), or a strategy with no way
+ * to sort (`"priority"` without a `priority` function). Everything else is the caller's
+ * business. Durations, delays and byte budgets are deliberately *not* required to be
+ * whole — half a millisecond is a coherent thing to ask for.
  *
- * @throws {TypeError} on an out-of-range number, or on `strategy: "priority"` without
- * a `priority` function.
+ * @throws {TypeError} on an out-of-range number, a fractional count, or on
+ * `strategy: "priority"` without a `priority` function.
  */
 export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOptions {
 	const strategy = options.strategy ?? "bfs";
@@ -159,17 +200,18 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 		userAgent: options.userAgent ?? DEFAULT_USER_AGENT,
 
 		// scheduling
-		concurrency: positive(options.concurrency, "concurrency") ?? 5,
-		perHostConcurrency: positive(options.perHostConcurrency, "perHostConcurrency") ??
-			2,
+		concurrency: positiveInteger(options.concurrency, "concurrency") ?? 5,
+		perHostConcurrency:
+			positiveInteger(options.perHostConcurrency, "perHostConcurrency") ??
+				2,
 		perHostDelay: nonNegative(options.perHostDelay, "perHostDelay") ?? 0,
 		strategy,
 		priority: options.priority,
-		maxQueued: positive(options.maxQueued, "maxQueued") ?? 100_000,
+		maxQueued: positiveInteger(options.maxQueued, "maxQueued") ?? 100_000,
 
 		// budgets — absent means unbounded
-		maxDepth: positive(options.maxDepth, "maxDepth") ?? Infinity,
-		maxPages: positive(options.maxPages, "maxPages") ?? Infinity,
+		maxDepth: positiveInteger(options.maxDepth, "maxDepth") ?? Infinity,
+		maxPages: positiveInteger(options.maxPages, "maxPages") ?? Infinity,
 		maxDuration: positive(options.maxDuration, "maxDuration") ?? Infinity,
 		maxTotalBytes: positive(options.maxTotalBytes, "maxTotalBytes") ?? Infinity,
 
@@ -183,7 +225,8 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 			checkExternal: scope.checkExternal ?? false,
 			followNofollow: scope.followNofollow ?? false,
 			followRegions,
-			maxUrlLength: positive(scope.maxUrlLength, "scope.maxUrlLength") ?? 2048,
+			maxUrlLength: positiveInteger(scope.maxUrlLength, "scope.maxUrlLength") ??
+				2048,
 		},
 		normalize: options.normalize ?? {},
 		// the values live in ./extract so that a standalone extractLinks() call and a
@@ -197,9 +240,10 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 			iframes: extract.iframes ?? DEFAULT_EXTRACT_OPTIONS.iframes,
 			assets: extract.assets ?? DEFAULT_EXTRACT_OPTIONS.assets,
 			srcset: extract.srcset ?? DEFAULT_EXTRACT_OPTIONS.srcset,
-			maxAnchorText: nonNegative(extract.maxAnchorText, "extract.maxAnchorText") ??
-				DEFAULT_EXTRACT_OPTIONS.maxAnchorText,
-			maxLinks: positive(extract.maxLinks, "extract.maxLinks") ??
+			maxAnchorText:
+				nonNegativeInteger(extract.maxAnchorText, "extract.maxAnchorText") ??
+					DEFAULT_EXTRACT_OPTIONS.maxAnchorText,
+			maxLinks: positiveInteger(extract.maxLinks, "extract.maxLinks") ??
 				DEFAULT_EXTRACT_OPTIONS.maxLinks,
 		},
 		robots: {
@@ -207,18 +251,20 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 			sitemaps: robots.sitemaps ?? false,
 			crawlDelayCap: nonNegative(robots.crawlDelayCap, "robots.crawlDelayCap") ??
 				30_000,
-			maxBytes: positive(robots.maxBytes, "robots.maxBytes") ?? 512_000,
+			maxBytes: positiveInteger(robots.maxBytes, "robots.maxBytes") ?? 512_000,
 			fetch: robots.fetch,
 		},
 		traps: {
 			maxSegmentRepeat:
-				positive(traps.maxSegmentRepeat, "traps.maxSegmentRepeat") ??
+				positiveInteger(traps.maxSegmentRepeat, "traps.maxSegmentRepeat") ??
 					3,
-			maxPathDepth: positive(traps.maxPathDepth, "traps.maxPathDepth") ?? 20,
-			maxQueryParams: positive(traps.maxQueryParams, "traps.maxQueryParams") ?? 32,
-			maxUrlsPerPath: positive(traps.maxUrlsPerPath, "traps.maxUrlsPerPath") ?? 200,
+			maxPathDepth: positiveInteger(traps.maxPathDepth, "traps.maxPathDepth") ?? 20,
+			maxQueryParams:
+				positiveInteger(traps.maxQueryParams, "traps.maxQueryParams") ?? 32,
+			maxUrlsPerPath:
+				positiveInteger(traps.maxUrlsPerPath, "traps.maxUrlsPerPath") ?? 200,
 			softDupThreshold:
-				positive(traps.softDupThreshold, "traps.softDupThreshold") ??
+				positiveInteger(traps.softDupThreshold, "traps.softDupThreshold") ??
 					10,
 		},
 		followCanonical: options.followCanonical ?? false,

@@ -395,7 +395,7 @@ Deno.test("parseRobotsTxt: hostile input", async (t) => {
 		for (
 			const input of [
 				"",
-				" ",
+				"\u0000",
 				":",
 				"::::",
 				"\n\n\n",

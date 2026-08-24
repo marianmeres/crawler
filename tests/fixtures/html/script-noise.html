@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>script noise</title>
+<script>
+	// <a href="/from-script-comment">not a link</a>
+	var markup = '<a href="/from-script-string">nope</a>';
+	if (a < b && c > d) { location.href = "/from-script-assignment"; }
+</script>
+<style>
+	/* <a href="/from-style-comment">no</a> */
+	body::after { content: "<a href='/from-style-content'>x</a>"; }
+</style>
+</head>
+<body>
+<!-- <a href="/from-html-comment">commented out</a> -->
+<a href="/real-1">the first real link</a>
+<noscript><a href="/from-noscript">noscript links are real links</a></noscript>
+<![CDATA[ <a href="/from-cdata">no</a> ]]>
+<textarea><a href="/from-textarea">no</a></textarea>
+<?php echo '<a href="/from-processing-instruction">no</a>'; ?>
+<a href="/real-2">the second real link</a>
+</body>
+</html>

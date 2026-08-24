@@ -574,6 +574,50 @@ Deno.test("extractLinks: caps and bad input", async (t) => {
 		);
 	});
 
+	await t.step("a fractional cap is floored, not handed to `length`", () => {
+		// `links.length = 0.5` is a RangeError, so a cap below 1 has to fall back to
+		// the default like any other out-of-range value (found by the fuzz suite)
+		assertEquals(hrefs(`<a href="/a">a</a><a href="/b">b</a>`, { maxLinks: 0.5 }), [
+			"/a",
+			"/b",
+		]);
+		assertEquals(hrefs(`<a href="/a">a</a><a href="/b">b</a>`, { maxLinks: 1.9 }), [
+			"/a",
+		]);
+		// `slice` tolerates a fraction, so this half only discriminates through the
+		// cap assertion the fuzz suite makes; it is here because "the cap is a whole
+		// number" is the rule, and 2.7 must mean 2 rather than "somewhere near 3"
+		const [link] = extractLinks(`<a href="/a">hello</a>`, BASE, {
+			maxAnchorText: 2.7,
+		});
+		assertEquals(link.anchorText, "he");
+	});
+
+	await t.step("a run of bare ampersands stays linear", () => {
+		// The `;` search used to run to the end of the document for every `&` that was
+		// not an entity — quadratic, on a query string any site can serve. Measured as
+		// a growth rate rather than a wall-clock ceiling: the broken version took only
+		// ~0.9 s at 200k, which passes any budget loose enough not to be flaky.
+		const timeFor = (n: number) => {
+			const html = `<a href="/x?${"&".repeat(n)}">x</a>`;
+			let best = Infinity;
+			for (let run = 0; run < 3; run++) {
+				const started = performance.now();
+				assertEquals(hrefs(html)[0].length, n + 3);
+				best = Math.min(best, performance.now() - started);
+			}
+			return best;
+		};
+		const small = timeFor(100_000);
+		const large = timeFor(400_000);
+		// 4x the input: linear is ~4x, the old quadratic measured ~18x
+		assert(
+			large < 8 * Math.max(small, 1),
+			`100k took ${small.toFixed(1)}ms but 400k took ${large.toFixed(1)}ms — ` +
+				`the entity scan is unbounded again`,
+		);
+	});
+
 	await t.step("an href no parser can resolve has no url", () => {
 		const [link] = extractLinks(`<a href="http://">x</a>`, BASE);
 		assertEquals([link.href, link.url], ["http://", undefined]);
@@ -605,7 +649,7 @@ Deno.test("extractLinks: caps and bad input", async (t) => {
 			"<!--",
 			"<![CDATA[",
 			"<?",
-			" �<a href=/x>",
+			"\u0000�<a href=/x>",
 			"<a href=/x>".repeat(1000),
 		];
 		for (const html of garbage) {

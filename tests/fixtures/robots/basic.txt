@@ -1,0 +1,8 @@
+# a plain, well-formed robots.txt
+User-agent: *
+Disallow: /admin/
+Disallow: /tmp/
+Allow: /admin/public/
+
+Sitemap: https://example.com/sitemap.xml
+Sitemap: https://example.com/sitemap-news.xml

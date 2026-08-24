@@ -1,0 +1,6 @@
+﻿User-agent: *
+Disallow: /bom-crlf/
+
+# a comment after a blank line
+Crawl-delay: 3
+Sitemap: https://example.com/s.xml

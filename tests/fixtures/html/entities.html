@@ -1,0 +1,13 @@
+<!DOCTYPE html>
+<html>
+<head><title>Caf&eacute; &amp; Bar &#8212; entities</title></head>
+<body>
+<a href="/search?q=a&amp;b=2">named amp in an href</a>
+<a href="/n?x=1&#38;y=2">decimal amp</a>
+<a href="/h?x=1&#x26;y=2">hex amp</a>
+<a href="/t">Tom &amp; Jerry &lt;3 &quot;quotes&quot; &#39;apostrophes&#39;</a>
+<a href="/nb">non&nbsp;breaking&#160;spaces</a>
+<a href="/unknown">&hellip; stays verbatim, and so does &constructor;</a>
+<a href="/bad">&#0; &#xD800; &#999999999; &notanentity &#; &amp</a>
+</body>
+</html>

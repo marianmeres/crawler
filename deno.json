@@ -42,6 +42,9 @@
 		"useTabs": true,
 		"lineWidth": 90,
 		"indentWidth": 4,
-		"proseWrap": "preserve"
+		"proseWrap": "preserve",
+		"exclude": [
+			"tests/fixtures/"
+		]
 	}
 }

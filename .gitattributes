@@ -1,0 +1,5 @@
+# The fixture corpus is byte-significant: `bom-crlf.txt` exists to carry a BOM and CRLF
+# line endings, and a checkout that normalized them would silently gut the test that
+# reads it. `-text` turns off every end-of-line conversion for the whole corpus, on
+# every machine, whatever the local `core.autocrlf` says. They stay diffable.
+tests/fixtures/** -text

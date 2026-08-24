@@ -34,13 +34,20 @@ stacks on that branch rather than starting a new one off `main`.
 | 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ✅ | `4f7a2a5` |
 | 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ✅ | `0914574` |
 
+## Third batch (corpora + scope + stores — backlog ranks 9-11)
+
+Branch: `sprint-01-foundations`, continued.
+
+| # | Task | Source | Status | Commit |
+|---|------|--------|--------|--------|
+| 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ✅ | `TBD9` |
+| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ⬜ | |
+| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ⬜ | |
+
 ## Backlog (ranked, post-sprint)
 
 | Rank | Task | Source | Status |
 |------|------|--------|--------|
-| 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ⬜ |
-| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ⬜ |
-| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ⬜ |
 | 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5 | ⬜ |
 | 13 | Fake-`FetchFn` helper + mini-site + engine tests | [05](./05-testing-docs-release.md) #3 | ⬜ |
 | 14 | robots.txt enforcement gate + directives | [02](./02-crawl-engine.md) #4 | ⬜ |
@@ -308,6 +315,77 @@ stacks on that branch rather than starting a new one off `main`.
   arrives (the tag ran into EOF) keeps the text after the quote, not the quote character.
   Found by a `parseMetaRobots("<meta name=robots content=\"")` test, which was reporting
   a directive token of `"`. (task 8, touches task 6's file)
+
+- **2026-08-24** — The `./extract` fixture corpus lives in `tests/extract/fixtures.test.ts`,
+  next to but separate from the inline suite doc 01 §5's layout folds it into. The two
+  answer different questions: the inline file pins one construct at a time, the fixture
+  file pins whole documents — the interactions that only appear when a `<base>`, a
+  `<script>` and an unclosed `<nav>` are on the same page. `tests/_fixtures.ts` is the
+  shared loader. `tests/fixtures/sitemaps/**` and `sitemap.test.ts` are NOT part of this
+  task: `parseSitemap` is backlog rank 18, and a fixture with no parser is a fixture that
+  rots. (task 9)
+
+- **2026-08-24** — Two fixtures doc 01 §5 describes as *large* are GENERATED at test
+  setup rather than committed: `giant.html` (the doc says so itself) and the 100k-line
+  half of `robots/hostile.txt` (the doc does not, but the same reasoning applies — the
+  committed file carries the nasty *shapes*, the volume is built in-test). Both soft caps
+  of doc 01 §4 are now pinned: `MAX_PATTERN_LENGTH` by the committed file,
+  `MAX_LINES` by the generated one. (task 9)
+
+- **2026-08-24** — **`decodeEntities` was quadratic on attacker-controlled input, and the
+  fuzz suite found it on its first run.** `text.indexOf(";", amp + 1)` scanned to the end
+  of the document for every `&` that was not an entity, so a query string of 200 000 bare
+  ampersands — a plain `href` any site can serve — cost ~0.9s of blocked event loop, and
+  400 000 cost ~4.8s. The `;` search is now bounded by `MAX_ENTITY_LENGTH`, which is
+  where the old code rejected the match anyway, so nothing about the result changed:
+  400k ampersands went from 2 960 ms to 39 ms. This runs on every attribute value of
+  every tag, i.e. the hottest path in the package. Third finding of this class here,
+  after the quadratic trailing-slash regex (task 3) and the exponential robots glob
+  (task 7). (task 9)
+
+- **2026-08-24** — `extractLinks` threw a `RangeError` on a fractional `maxLinks`
+  (`links.length = 0.5`), breaking its documented totality. `positiveOr`/`nonNegativeOr`
+  now floor to a whole number and treat anything that floors to `0` as out of range.
+  Found by the options fuzz. (task 9)
+
+- **2026-08-24** — Consequently `resolveCrawlOptions` REJECTS a fractional count
+  (`concurrency`, `perHostConcurrency`, `maxQueued`, `maxDepth`, `maxPages`,
+  `scope.maxUrlLength`, `extract.maxLinks`, `extract.maxAnchorText`, `robots.maxBytes`,
+  every `traps.*`). Without it the two halves disagree in the worst direction:
+  `extract: { maxLinks: 0.5 }` passed validation, failed `./extract`'s own range check,
+  and came back as the default `10_000` — the opposite of the ask, with no error
+  anywhere. Durations, delays and byte budgets stay fractional-friendly; half a
+  millisecond is a coherent request, half a link is not. `Infinity` still passes
+  everywhere. (task 9, touches task 4's file)
+
+- **2026-08-24** — Timing regression guards are **growth-rate** measurements, not
+  wall-clock ceilings, wherever the bug they guard is super-linear. The first spelling of
+  the ampersand guard used a 2 000 ms budget and would have passed against the broken
+  code (~0.9 s at 200k) — an absolute budget at one input size measures the machine, and
+  the budget has to be loose enough not to be flaky. The guards now time two input sizes
+  (best of three runs each) and assert the ratio: 4x the input is ~4x the time when
+  linear and was ~18x when quadratic. Verified by re-running each guard against a
+  reverted copy of the source. Same change applied to `giant.html`'s linearity step,
+  which additionally has to pass `maxLinks: Infinity` — the default cap stopped the scan
+  a third of the way in, so it was measuring a fraction of the document it claimed.
+  (task 9)
+
+- **2026-08-24** — The fuzz suite asserts **how many links its generators produce**, not
+  only that nothing threw. Uniformly random bytes essentially never spell a tag: that
+  generator yields exactly zero links, so its per-link well-formedness checks were dead
+  while still looking like a 1 500-iteration fuzz. The markup generator now assembles
+  tags (weighted toward `href`-bearing elements, with the raw-text elements kept rare
+  because they swallow the rest of the document) and every generator carries a floor on
+  its yield. (task 9)
+
+- **2026-08-24** — Housekeeping the corpus forced two config files.
+  `deno.json` gains `fmt.exclude: ["tests/fixtures/"]` — `deno fmt` really does rewrite
+  the HTML fixtures (verified: it re-indents them), and a corpus whose entire value is
+  "these exact bytes" must not be under a formatter whose treatment of malformed markup
+  is undefined and version-dependent. A new `.gitattributes` marks the corpus `-text` so
+  no checkout normalizes `robots/bom-crlf.txt`'s CRLFs out of existence. Separately, the
+  raw NUL byte in three test sources is now written `\u0000`: git classified those files
+  as binary, so their diffs were unreviewable. (task 9)
 
 ## How to resume (for a fresh conversation)
 

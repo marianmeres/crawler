@@ -1,0 +1,6 @@
+User-agent: *
+Disallow: /*.pdf$
+Disallow: /search?*
+Disallow: /a/*/b
+Allow: /a/keep/b
+Disallow: /$
