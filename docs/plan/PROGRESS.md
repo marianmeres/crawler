@@ -28,13 +28,13 @@ Sprint 1 is complete. Next up is backlog rank 6 (`extractLinks`), which is what 
 
 | Rank | Task | Source | Status |
 |------|------|--------|--------|
-| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner | [01](./01-url-and-extraction.md) #6 | ⬜ |
+| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ⬜ |
 | 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ⬜ |
 | 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ⬜ |
 | 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ⬜ |
-| 10 | Scope evaluation + `SkipReason` + private-host guard | [02](./02-crawl-engine.md) #2 | ⬜ |
+| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ⬜ |
 | 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ⬜ |
-| 12 | Worker pool, politeness, streaming `run()` | [02](./02-crawl-engine.md) #5 | ⬜ |
+| 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5 | ⬜ |
 | 13 | Fake-`FetchFn` helper + mini-site + engine tests | [05](./05-testing-docs-release.md) #3 | ⬜ |
 | 14 | robots.txt enforcement gate + directives | [02](./02-crawl-engine.md) #4 | ⬜ |
 | 15 | Events, stats, safeEmit, id threading | [02](./02-crawl-engine.md) #6 | ⬜ |
@@ -188,6 +188,48 @@ Sprint 1 is complete. Next up is backlog rank 6 (`extractLinks`), which is what 
   disposal releases engine-owned fetchers and a crawler that never ran owns none, so
   that one is correct rather than stubbed. Half-working crawl semantics would be worse
   than a throw. (task 4)
+
+- **2026-08-24** — **Region scoping promoted into v1** (was the design sketch's
+  "nice-to-have, not v1" at tmp/crawler-DESIGN.md:256-258). Driven by the real use case:
+  follow only in-`<main>` content links, ignore header/nav/footer chrome. Shape:
+  `RawLink.region`/`LinkRecord.region` (innermost landmark, always tracked, no option) +
+  `scope.followRegions` (default `[]` = off) + `SkipReason: "out-of-region"`. Three
+  rules: filtering happens in scope not extraction (chrome links stay in the graph);
+  innermost-wins so `["main", "article"]` is the documented value; whole-document
+  fallback when a page has no landmarks at all, warned once per crawl. Rejected the
+  alternative of a `beforeExtract(html)` hook + html-extract for this case — it needs a
+  second package and a tree parser for what a tag-depth stack does natively. That hook
+  remains the documented escape hatch for div-soup sites, deferred until needed.
+  Applied to docs 01/02/05 and to the already-landed `src/types.ts`, `src/options.ts`,
+  `src/extract/types.ts` and `tests/options.test.ts`. (tasks 6, 10)
+
+- **2026-08-24** — **`beforeExtract` hook accepted into v1** (not deferred). Region
+  scoping matches element names only, so `<div class="main">` — the common case, not the
+  exotic one — has nothing to match; the hook lets the consumer narrow the HTML with
+  `@marianmeres/html-extract` before body links are discovered. Kept a hook rather than a
+  crawler dependency on html-extract: the core jobs (link checking, sitemap generation,
+  graph building) need no DOM, and JSR has no `optionalDependencies`, so a direct dep
+  would tax every such user with a parser they never call. The ergonomic objection is
+  answered by a one-line recipe plus equal billing for both modes in the README, not by
+  the dependency. Binding detail: extraction becomes **two passes** — `<head>`-derived
+  data (title, canonical, next/prev, meta-refresh, meta-robots) always from the raw
+  document, anchors/assets from the narrowed HTML — and raw bytes (contentHash, size,
+  body archive) are never affected. A throwing hook degrades to the full document with
+  one warning. Applied to docs 02/05 and to the landed `src/types.ts`, `src/options.ts`,
+  `tests/options.test.ts`. (tasks 12, 37)
+
+- **2026-08-24** — `beforeExtract` verified end-to-end against the now-published
+  `@marianmeres/html-extract` v0.3.0 (284 tests green there; linkedom parser, single
+  export, no parser types in its public API, `clean()` carries the not-a-sanitizer
+  disclaimer). The contract `extractMainContent(html)?.html ?? html` holds as specified:
+  returns `MainContent | null` with `.html`, throws only on non-string input. Probe
+  findings folded into doc 02: hrefs survive verbatim (relative stays relative);
+  `<nav>`/`<header>`/`<footer>`/`<aside>` are already dropped by the extractor; and — the
+  one **bug found in our own spec** — `<base href>` is gone from the narrowed HTML, so
+  the engine must compute the effective base once from the raw document and pass it to
+  *both* extraction passes instead of letting the body pass re-derive it. Without that,
+  every relative link on a `<base>`-bearing page resolves wrongly and silently. Test
+  required in doc 05. (task 12)
 
 ## How to resume (for a fresh conversation)
 

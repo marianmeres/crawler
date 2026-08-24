@@ -80,6 +80,7 @@ export interface ResolvedCrawlOptions {
 	allowPrivateHosts: boolean;
 	stores: { frontier?: FrontierStore; visited?: VisitedStore };
 	collect: Required<CollectOptions>;
+	beforeExtract?: (html: string, ctx: PageContext) => string | Promise<string>;
 	shouldVisit?: (url: string, ctx: LinkContext) => boolean | Promise<boolean>;
 	onPage?: (res: PageResult, ctx: PageContext) => unknown | Promise<unknown>;
 	onLink?: (link: LinkRecordArg) => void;
@@ -147,6 +148,10 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 		? [...scope.pathPrefix]
 		: [scope.pathPrefix];
 
+	// copied for the same reason as pathPrefix: a caller mutating their array
+	// afterwards must not reach into a running crawl
+	const followRegions = [...(scope.followRegions ?? [])];
+
 	return {
 		// transport
 		fetcher: options.fetcher,
@@ -176,6 +181,7 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 			allowExternal: scope.allowExternal ?? false,
 			checkExternal: scope.checkExternal ?? false,
 			followNofollow: scope.followNofollow ?? false,
+			followRegions,
 			maxUrlLength: positive(scope.maxUrlLength, "scope.maxUrlLength") ?? 2048,
 		},
 		normalize: options.normalize ?? {},
@@ -221,6 +227,7 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 		},
 
 		// hooks + events
+		beforeExtract: options.beforeExtract,
 		shouldVisit: options.shouldVisit,
 		onPage: options.onPage,
 		onLink: options.onLink,

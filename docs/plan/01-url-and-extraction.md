@@ -479,7 +479,7 @@ tests/
     urls/normalize-cases.json
     html/  basic.html  messy-unclosed.html  base-href.html  entities.html
            srcset.html  meta-refresh.html  script-noise.html  assets.html
-           anchor-text.html  giant.html
+           anchor-text.html  giant.html  landmarks.html  no-landmarks.html
     robots/  basic.txt  wildcards.txt  groups.txt  crawl-delay.txt
              empty.txt  bom-crlf.txt  conflicting-precedence.txt  hostile.txt
     sitemaps/  urlset.xml  sitemapindex.xml  broken.xml  cdata-entities.xml  plain.txt
@@ -510,6 +510,17 @@ Fixture intent worth pinning (per file):
 - `base-href.html` — `<base href>` present; only the FIRST `<base>` counts.
 - `entities.html` — `&amp;` in hrefs, numeric/hex entities in anchor text.
 - `giant.html` — thousands of links; asserts the `maxLinks` cap and linear-ish runtime.
+- `landmarks.html` — the region-tracking proof (item 6 step 9). Must contain, at minimum:
+  a link in `<header>`, one in a top-level `<nav>`, one in `<main>` directly, one in
+  `<main><article><p>` (must report `"article"`, NOT `"main"` — the innermost rule, and
+  the reason `followRegions` is documented as `["main", "article"]`), one in
+  `<main><nav>` (a docs sidebar — must report `"nav"`, the case outermost-wins would get
+  wrong), one in `<article><header>` (reports `"header"`), one in `<aside>`, one in
+  `<footer>`, and one in a plain `<div>` outside every landmark (reports `undefined`).
+  Add an unclosed `<nav>` to prove the stack tolerates unbalanced markup.
+- `no-landmarks.html` — div-soup with zero landmark elements; every link reports
+  `region: undefined`. This is the fixture doc 02's no-regioned-links fallback is
+  tested against.
 - `robots/hostile.txt` — 100k lines / huge patterns; asserts the soft caps of item 4.
 - `robots/conflicting-precedence.txt` — equal-length Allow vs Disallow (allow wins),
   longest-match cases with `*` and `$`.
@@ -565,11 +576,17 @@ export interface RawLink {
 	nofollow: boolean;
 	ugc: boolean;
 	sponsored: boolean;
+	/** Innermost enclosing sectioning landmark, when the document has one. Always
+	 *  tracked (no option) — it is a tag-depth stack in a scanner already tracking tag
+	 *  boundaries. Feeds `LinkRecord.region` and `scope.followRegions` (doc 02). */
+	region?: LinkRegion;
 	/** <a>/<area> only: trimmed, whitespace-collapsed, entity-decoded, length-capped. */
 	anchorText?: string;
 	/** link[rel=alternate] only. */
 	hreflang?: string;
 }
+
+export type LinkRegion = "main" | "article" | "nav" | "header" | "footer" | "aside";
 
 export interface ExtractOptions {
 	anchors?: boolean;      // default true  — <a href>, <area href>          rel "page"
@@ -630,7 +647,17 @@ Tokenizer (single forward scan, no DOM, no global regex over the whole document)
 8. `srcset`: split candidates on `,`, take the first whitespace-delimited token of each.
    Caveat (JSDoc): descriptor-less URLs containing commas can mis-split — accepted
    tolerance, matches what lenient consumers do.
-9. `rel` attribute on a/area/link: whitespace-split, lowercased set → `nofollow`, `ugc`,
+9. **Region tracking** — maintain a stack of the six `LinkRegion` landmark tags. Push
+   on an open tag (ignoring self-closing/void forms), pop on the matching close;
+   tolerate unbalanced markup by popping to the nearest matching entry and ignoring a
+   close with no open. Each emitted link records `region = top of stack`, i.e. the
+   **innermost** landmark. Innermost-wins is the whole point: a `<nav>` nested inside
+   `<main>` (docs sidebar, in-page ToC) must report `"nav"` so the crawl can skip it —
+   an outermost-wins rule would report `"main"` and follow the entire sidebar. The
+   accepted consequence is that an `<article><header>` byline reports `"header"`.
+   Cap the stack depth (reuse the pathological-nesting cap) and never let a malformed
+   document grow it unboundedly.
+10. `rel` attribute on a/area/link: whitespace-split, lowercased set → `nofollow`, `ugc`,
    `sponsored` flags; `<link>` classification: `canonical`/`next`/`prev`/`alternate`
    (with `hreflang`)/`stylesheet` (asset).
 

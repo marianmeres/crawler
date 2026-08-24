@@ -4,6 +4,7 @@ import {
 	resolveCrawlOptions,
 	type ResolvedCrawlOptions,
 } from "../src/options.ts";
+import type { LinkRegion } from "../src/mod.ts";
 
 /**
  * The whole default table in one assertion. If a documented default on `CrawlOptions`
@@ -30,6 +31,7 @@ const DEFAULTS: ResolvedCrawlOptions = {
 		allowExternal: false,
 		checkExternal: false,
 		followNofollow: false,
+		followRegions: [],
 		maxUrlLength: 2048,
 	},
 	normalize: {},
@@ -64,6 +66,7 @@ const DEFAULTS: ResolvedCrawlOptions = {
 	allowPrivateHosts: true,
 	stores: {},
 	collect: { pages: false, graph: false },
+	beforeExtract: undefined,
 	shouldVisit: undefined,
 	onPage: undefined,
 	onLink: undefined,
@@ -150,6 +153,17 @@ Deno.test("resolveCrawlOptions() — pathPrefix is always an array, always a cop
 	assertEquals(resolved.scope.pathPrefix, given);
 	// caller mutating their array afterwards must not reach into the crawl
 	assertNotStrictEquals(resolved.scope.pathPrefix, given);
+});
+
+Deno.test("resolveCrawlOptions() — followRegions defaults to [] and is copied", () => {
+	// [] means "no region filtering", NOT "follow nothing" — the engine treats an empty
+	// list as the feature being off, which is what keeps it backwards-compatible.
+	assertEquals(resolveCrawlOptions({}).scope.followRegions, []);
+
+	const given: LinkRegion[] = ["main", "article"];
+	const resolved = resolveCrawlOptions({ scope: { followRegions: given } });
+	assertEquals(resolved.scope.followRegions, given);
+	assertNotStrictEquals(resolved.scope.followRegions, given);
 });
 
 Deno.test("resolveCrawlOptions() — stores are copied, absent ones stay absent", () => {

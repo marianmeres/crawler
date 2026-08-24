@@ -21,7 +21,7 @@
  */
 
 import type { Fetcher, FetchFn, FetchResult, Logger } from "@marianmeres/page-fetcher";
-import type { ExtractOptions } from "./extract/types.ts";
+import type { ExtractOptions, LinkRegion } from "./extract/types.ts";
 import type {
 	FrontierItem,
 	FrontierStore,
@@ -33,7 +33,15 @@ import type { NormalizeOptions } from "./url/mod.ts";
 // Re-exported so consumers can type a fetcher, a logger or a store without importing
 // page-fetcher (or this package's `./stores` subpath) themselves — the page-fetcher
 // `Logger` re-export precedent.
-export type { ExtractOptions, Fetcher, FetchFn, FetchResult, Logger, NormalizeOptions };
+export type {
+	ExtractOptions,
+	Fetcher,
+	FetchFn,
+	FetchResult,
+	LinkRegion,
+	Logger,
+	NormalizeOptions,
+};
 export type { FrontierItem, FrontierStore, VisitedState, VisitedStore };
 
 // -----------------------------------------------------------------------------------
@@ -67,6 +75,22 @@ export interface ScopeOptions {
 	checkExternal?: boolean;
 	/** Follow links marked `rel="nofollow"` anyway. Default `false`. */
 	followNofollow?: boolean;
+	/**
+	 * Follow only links whose {@linkcode LinkRecord.region} is listed — the "crawl the
+	 * content, ignore the chrome" mode. Links outside the listed landmarks are still
+	 * extracted and still recorded in the graph; they are simply not visited, with
+	 * `skipReason: "out-of-region"`. Default `[]`, i.e. no region filtering.
+	 *
+	 * Prefer `["main", "article"]` over `["main"]`: {@linkcode LinkRegion} is the
+	 * *innermost* landmark, so a link inside `<main><article>` reports `"article"` and
+	 * `["main"]` alone would skip the entire body of a typical blog or docs page.
+	 *
+	 * **Fallback** — if a document yields no regioned links at all (no landmark markup
+	 * anywhere), region filtering does not apply to that document and every link is
+	 * considered. Without this a single non-semantic page would silently dead-end the
+	 * crawl. The engine warns once per crawl the first time it fires.
+	 */
+	followRegions?: LinkRegion[];
 	/** Reject longer URLs with `"too-long"`. Default `2048`. */
 	maxUrlLength?: number;
 }
@@ -93,6 +117,7 @@ export type SkipReason =
 	| "too-long"
 	| "private-host"
 	| "queue-full"
+	| "out-of-region"
 	| "user";
 
 /** robots.txt policy. Parsing lives in `./extract`; this is cache + enforcement. */
@@ -249,6 +274,32 @@ export interface CrawlOptions {
 
 	// --- hooks (produce data; a throw fails the page) ---
 	/**
+	 * Narrow the HTML that **body link discovery** runs over — the escape hatch for
+	 * sites whose main content is a `<div class="main">` rather than a `<main>`, where
+	 * {@linkcode ScopeOptions.followRegions} has nothing to match on.
+	 *
+	 * The one-line recipe is a content extractor with a raw-HTML fallback:
+	 *
+	 * ```ts
+	 * beforeExtract: (html) => extractMainContent(html)?.html ?? html
+	 * ```
+	 *
+	 * Three rules, because this hook is easy to get wrong:
+	 *
+	 * 1. **It narrows link discovery only.** `<head>`-derived data — title, meta-robots,
+	 *    `<link rel=canonical|next|prev|alternate>`, meta-refresh — is always read from
+	 *    the raw document, which a `<main>`-only narrowing would otherwise destroy.
+	 * 2. **It never affects stored bytes.** `contentHash`, `PageResult.size`,
+	 *    `ctx.fetchResult` and the `./pg` body archive all keep the raw body.
+	 * 3. **A throw is not fatal.** The engine falls back to the raw HTML and warns once
+	 *    per crawl — narrowing is an optimization, not a correctness requirement.
+	 *
+	 * Composes with `followRegions`: narrowing runs first, then region filtering applies
+	 * to whatever landmarks remain (usually none, so the whole-document fallback makes
+	 * it a no-op — which is the intended outcome).
+	 */
+	beforeExtract?(html: string, ctx: PageContext): string | Promise<string>;
+	/**
 	 * Final say on whether to follow a link, called only for links that already passed
 	 * every built-in check. Returning `false` records `skipReason: "user"`.
 	 */
@@ -315,6 +366,11 @@ export interface LinkRecord {
 	kind: "internal" | "external";
 	rel: LinkRel;
 	nofollow: boolean;
+	/**
+	 * Innermost sectioning landmark the link was found in, when the markup has one.
+	 * Drives {@linkcode ScopeOptions.followRegions}.
+	 */
+	region?: LinkRegion;
 	anchorText?: string;
 	followed: boolean;
 	/** Present iff `followed` is `false`. */

@@ -270,7 +270,23 @@ Engine test files (each states its assertions against `SMALL_SITE` unless noted)
 - `tests/crawler-scope-robots.test.ts` — same-host default (ext.test recorded, not
   visited, `skipReason: "out-of-scope"`); robots disallow honored + skip recorded;
   `respectRobots: false` warns exactly once (recordingLogger); 5xx robots →
-  disallow-all.
+  disallow-all. Plus region scoping (doc 02 item 2): with
+  `followRegions: ["main", "article"]` over a landmark-bearing `MiniSite` page, links in
+  `<main>`/`<main><article>` are followed while `<nav>`/`<header>`/`<footer>`/`<aside>`
+  ones appear in the graph with `followed: false, skipReason: "out-of-region"` (never
+  missing — the no-silent-drops rule); a `<main><nav>` link is skipped (innermost-wins);
+  `followRegions: ["main"]` alone skips `<article>` body links (pins the documented
+  footgun); and a landmark-free page still crawls normally via the whole-document
+  fallback, warning exactly once per crawl even across several such pages. Plus
+  `beforeExtract` (doc 02 item 2): a `<div class="main">` page narrowed by a fake hook
+  yields only in-content links while `<head>`-derived data survives (title, canonical
+  and meta-robots still read from the raw HTML — the two-pass rule); a throwing hook
+  falls back to the full document, warns once, and does not fail the page; and
+  `contentHash`/`size` match the raw body, not the narrowed one. **Must include a
+  `<base href>` page** — with the hook active, a relative link in the narrowed content
+  still resolves against the raw document's `<base>`, not against `finalUrl` (the
+  regression this test exists to catch; `<base>` lives in `<head>` and is gone from the
+  narrowed HTML).
 - `tests/crawler-politeness.test.ts` — instrument `siteFetch` with in-flight counters:
   global and per-host concurrency never exceeded; perHostDelay spacing between
   same-host call timestamps (generous tolerance, no exact-timing asserts).
@@ -371,6 +387,19 @@ documentation-mandatory per owner decisions and would otherwise bite users silen
   not the full Public Suffix List; PSL injectable; default `"same-host"` is unaffected.
 - **robots opt-out**: `respectRobots: false` exists for own/staging sites and logs one
   warning; 4xx/failed robots = allow-all, 5xx = disallow-all.
+- **"crawl the content, not the nav" — the two modes, side by side and equally
+  prominent** (this is a headline feature, not a footnote; every page links to every
+  other page through its nav, so content-only following is what yields the content graph
+  instead of the navigation graph):
+  - semantic markup → `scope.followRegions: ["main", "article"]`, with the
+    innermost-wins footgun spelled out (`["main"]` alone skips `<article>` bodies) and
+    the no-landmarks whole-document fallback;
+  - anything else (`<div class="main">`, i.e. most of the web) → `beforeExtract` plus
+    `@marianmeres/html-extract`, shown as the one-line recipe
+    `beforeExtract: (html) => extractMainContent(html)?.html ?? html`, noting that
+    html-extract is a **sibling package the crawler does not depend on**, that the hook
+    narrows link discovery only (`<head>` data and stored bytes are untouched), and that
+    a throwing hook degrades to a full-document crawl.
 - **steve guidance box**: one crawl = one job; raise
   `autoCleanup.maxAllowedRunDurationMinutes` (default 5) for crawls longer than
   minutes; live progress is read from the crawl-run row, not from steve (steve has no

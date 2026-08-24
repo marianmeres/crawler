@@ -1,5 +1,6 @@
 /**
- * Public option types of the `./extract` submodule.
+ * Public types of the `./extract` submodule: what the extractor is told to look for
+ * ({@linkcode ExtractOptions}) and one shape it reports back ({@linkcode LinkRegion}).
  *
  * The extractor itself (`extractLinks`, `extractBaseHref`, `extractTitle` and the
  * tolerant HTML scanner behind them) is not written yet; this file exists ahead of it
@@ -7,6 +8,29 @@
  *
  * @module
  */
+
+/**
+ * Sectioning landmark a link was found inside, when the document uses semantic HTML.
+ *
+ * Always the **innermost** enclosing landmark, which is what makes it useful: a `<nav>`
+ * nested inside `<main>` — an in-page table of contents, a docs sidebar — reports
+ * `"nav"`, not `"main"`, so {@linkcode "../types.ts".ScopeOptions.followRegions} can
+ * skip it. The cost is that an `<article><header>` byline reports `"header"` and is
+ * treated as chrome; that is the deliberate trade.
+ *
+ * `undefined` on a {@linkcode "../types.ts".LinkRecord} means the link was inside none
+ * of these — div-soup markup, or a link sitting directly in `<body>`.
+ *
+ * Tracking is unconditional: it costs a small tag-depth stack in a scanner that is
+ * already tracking tag boundaries, so there is no option to turn it off.
+ */
+export type LinkRegion =
+	| "main"
+	| "article"
+	| "nav"
+	| "header"
+	| "footer"
+	| "aside";
 
 /**
  * Which link sources the extractor looks at, and its two safety caps.

@@ -128,6 +128,7 @@ export interface CrawlOptions {
 	stores?: { frontier?: FrontierStore; visited?: VisitedStore }; // default: memory
 	collect?: { pages?: boolean; graph?: boolean }; // what report() accumulates; see below
 	// hooks
+	beforeExtract?(html: string, ctx: PageContext): string | Promise<string>;
 	shouldVisit?(url: string, ctx: LinkContext): boolean | Promise<boolean>;
 	onPage?(res: PageResult, ctx: PageContext): unknown | Promise<unknown>;
 	onLink?(link: LinkRecord): void;
@@ -177,6 +178,7 @@ export interface LinkRecord {     // sketch shape kept (tmp/crawler-DESIGN.md:16
 	kind: "internal" | "external";
 	rel: "page" | "asset" | "canonical" | "alternate" | "next" | "prev" | "sitemap" | "iframe";
 	nofollow: boolean;
+	region?: LinkRegion;           // innermost landmark (doc 01 item 6); drives followRegions
 	anchorText?: string;
 	followed: boolean;
 	skipReason?: SkipReason;
@@ -280,20 +282,30 @@ export interface ScopeOptions {   // sketch shape kept (tmp/crawler-DESIGN.md:27
 	allowExternal?: boolean;        // default false — record, don't visit
 	checkExternal?: boolean;        // default false — visit once, depth-capped, retainBody:false
 	followNofollow?: boolean;       // default false
+	followRegions?: LinkRegion[];   // default [] = off; see "region scoping" below
 	maxUrlLength?: number;          // default 2048
 }
 
 export type SkipReason =
 	| "out-of-scope" | "excluded" | "duplicate" | "max-depth" | "max-pages"
 	| "nofollow" | "robots-disallow" | "bad-scheme" | "unsupported-type"
-	| "trap" | "too-long" | "private-host" | "queue-full" | "user";
+	| "trap" | "too-long" | "private-host" | "queue-full" | "out-of-region" | "user";
 // = sketch union (tmp/crawler-DESIGN.md:286-287) + "private-host" (decision 16 guard)
-//   + "queue-full" (maxQueued overflow; see item 5).
+//   + "queue-full" (maxQueued overflow; see item 5)
+//   + "out-of-region" (followRegions; the sketch anticipated this as a nice-to-have at
+//     tmp/crawler-DESIGN.md:256-258 — promoted to v1, see "region scoping" below).
 
 // src/engine/scope.ts — pure; engine supplies the async bits (robots, visited, shouldVisit)
 export type ScopeVerdict = { follow: true } | { follow: false; reason: SkipReason };
 export function evaluateScope(to: URL, ctx: {
 	seedHosts: string[]; scope: Required<ScopeOptions>; kind: "internal" | "external";
+	/** Innermost landmark of the link under evaluation; undefined when the markup had
+	 *  none. Ignored unless `scope.followRegions` is non-empty. */
+	region?: LinkRegion;
+	/** False when the whole document produced no regioned links — lets the pure
+	 *  function honor the document-level fallback without knowing about documents.
+	 *  The engine computes it once per page and passes the same value for every link. */
+	regionsPresent?: boolean;
 }): ScopeVerdict;
 ```
 
@@ -305,20 +317,112 @@ Engine-side check order (first hit wins, spec'd so tests can pin it):
 4. `excluded` / include-miss → `excluded` (document: include-miss reports `excluded`).
 5. `nofollow` — link rel nofollow (unless followNofollow), or the SOURCE page had
    meta-robots/X-Robots-Tag nofollow (item 4; same reason, documented).
-6. `unsupported-type` — extension deny-list for obvious binaries
+6. `out-of-region` — `followRegions` non-empty and `link.region` not in it. Cheap,
+   pure, synchronous — placed here (with the other markup-derived checks, before the
+   awaited robots gate) so a nav-heavy page short-circuits most of its links.
+   **Subject to the whole-document fallback below.**
+7. `unsupported-type` — extension deny-list for obvious binaries
    (images/archives/media/fonts) when the link is rel "page"; rel "asset" links are
    only fetched under checkExternal/link-check recipes, with `retainBody: false`
    (page-fetcher/src/types.ts:103-108) and never parsed for links.
-7. `robots-disallow` — item 4 gate (async, awaited during link processing).
-8. `max-depth` / `max-pages` — budget state (item 7).
-9. `trap` — item 8.
-10. `duplicate` — visited, or frontier `push()` returned false (item 3).
-11. `user` — `shouldVisit` returned false (called last, only for links that passed
+8. `robots-disallow` — item 4 gate (async, awaited during link processing).
+9. `max-depth` / `max-pages` — budget state (item 7).
+10. `trap` — item 8.
+11. `duplicate` — visited, or frontier `push()` returned false (item 3).
+12. `user` — `shouldVisit` returned false (called last, only for links that passed
     everything above; may be async).
 
 Every `follow: false` produces: `LinkRecord.followed = false` + `skipReason`,
 `onLink` + `events.onLinkSkipped`, `stats.skippedByReason[reason]++`. Never a
 pseudo-PageResult (decision 13; sketch §13.5, tmp/crawler-DESIGN.md:435-436).
+
+**Region scoping (`scope.followRegions`)** — "crawl the content, ignore the chrome".
+Motivating case: a docs/content site where only in-`<main>` links should be traversed,
+so header/nav/footer links are recorded but never followed. This is not a niche filter —
+every page links to every other page through its nav, so following only content links
+collapses the frontier and yields the actual *content* graph instead of the *navigation*
+graph.
+
+Three rules, all of which need tests:
+
+1. **Filtering happens in scope, never in extraction.** `extractLinks` always returns
+   every link with its `region`; only the follow decision consults `followRegions`. A
+   chrome link therefore still lands in `report.graph` with
+   `followed: false, skipReason: "out-of-region"`, so link-checking a footer still
+   works. Filtering at extraction time would silently delete graph data — exactly the
+   "silent drops make crawlers impossible to debug" failure the SkipReason union exists
+   to prevent.
+2. **Innermost-wins, so `["main", "article"]` is the documented value.** `region` is the
+   innermost landmark (doc 01 item 6 step 9), so a link in `<main><article><p>` reports
+   `"article"`. `["main"]` alone would skip the body of a typical blog/docs page. The
+   JSDoc must say this; a user reaching for `["main"]` and silently getting a one-page
+   crawl is the most likely support question this feature will generate.
+3. **Whole-document fallback.** If a fetched document yields **no** regioned links at
+   all (`links.every(l => !l.region)` — div-soup markup with no landmarks), region
+   filtering does not apply to that document and every link is evaluated normally.
+   Without this, one non-semantic page silently dead-ends the crawl. Log
+   `logger?.warn` **once per crawl** (a latched flag, not per page) naming the first URL
+   that triggered it, and count it in stats so it shows up in a report rather than only
+   in logs. The check is per *document*, not per link: a page whose links all sit in
+   `<footer>` has regioned links, so the fallback correctly does not fire and those
+   links are correctly skipped.
+
+**`beforeExtract` — the div-soup escape hatch.** Region scoping only sees element names,
+so a site whose content is `<div class="main">` has no landmarks to match and falls back
+to following everything. That is the common case, not the exotic one, so the engine gives
+the consumer a seam to narrow the HTML before body links are discovered — typically by
+handing it to a content extractor (`@marianmeres/html-extract`, a sibling package the
+crawler does **not** depend on):
+
+```ts
+beforeExtract: (html) => extractMainContent(html)?.html ?? html
+```
+
+Kept a hook rather than a dependency because the crawler's core jobs — link checking,
+sitemap generation, graph building — need no DOM at all, and JSR has no
+`optionalDependencies`, so a direct dependency would tax every one of those users with a
+parser they never call. The `?? html` fallback is not decoration: extraction failing must
+degrade to a full-document crawl, never to a dead end.
+
+Extraction becomes **two passes** when the hook is set, and this is the part an
+implementation will get wrong if it is not spelled out:
+
+| Pass | Input | Base | Sources enabled |
+|------|-------|------|-----------------|
+| head | raw HTML | `extractBaseHref(rawHtml, finalUrl)` | `canonical`, `nextPrev`, `alternate`, `metaRefresh` + `extractTitle` + `parseMetaRobots` |
+| body | `beforeExtract(html)` result | **the same value** — passed in, never re-derived | `anchors`, `assets`, `srcset` |
+
+Narrowing to `<main>` removes `<head>`, so title, canonical, next/prev and meta-robots
+**must** come from the raw document or they silently vanish. Without the hook there is
+exactly one pass over the raw HTML, as today — do not pay for two passes by default.
+
+**The `<base href>` trap — verified against a real narrowing, not assumed.** `<base>`
+lives in `<head>`, so it is *gone* from the narrowed HTML (confirmed by probing
+`@marianmeres/html-extract@0.3.0`: `extractMainContent()` returns the content subtree
+with hrefs exactly as written and no `<base>`). If the body pass is handed `finalUrl` and
+left to re-derive its own base, every relative link on a `<base>`-bearing page resolves
+against the wrong origin path — silently, and for every URL on the page. So the engine
+computes the effective base **once, from the raw document**, and passes it as the
+`baseUrl` argument of *both* `extractLinks` calls. Under the hook, `extractLinks` must
+never be allowed to fall back to its own `<base>` lookup for the body pass.
+
+Two properties of the narrowed HTML the engine can rely on (same probe): hrefs are
+preserved verbatim — relative stays relative, so `rawHref` and the crawler's own
+resolution are unaffected — and `<nav>`, `<header>`, `<footer>` and `<aside>` subtrees
+are already dropped by the extractor, so chrome filtering happens even where
+`followRegions` had nothing to match.
+
+Three further rules:
+
+- **Raw bytes are untouched.** `contentHash`, `PageResult.size`, `ctx.fetchResult` and
+  doc 03's body archive all keep the full response. The hook narrows *discovery*, not
+  storage — persisting a narrowed body would break re-extraction, which is the entire
+  point of archiving bodies.
+- **A throw is not fatal.** Fall back to the raw HTML, `logger?.warn` once per crawl
+  (latched, like the region fallback), and keep crawling.
+- **Composes with `followRegions`.** Narrowing runs first; region filtering then applies
+  to whatever landmarks survive — usually none, so the whole-document fallback makes it a
+  no-op. Using both is therefore safe and needs no special-casing.
 
 **Files**
 - `src/engine/scope.ts`, `src/engine/private-host.ts` (verbatim-ish copy of
@@ -567,7 +671,8 @@ Dispatcher state per host: `{ inFlight: number, nextReadyAt: number }` in a
 Worker (per claimed item): compose `signal = AbortSignal.any([options.signal,
 internalController.signal])`; fetch with `{ url, signal, retainBody, headers
 (conditional, per recrawl), meta: { crawlId, depth, referrer } }`; on HTML result with
-body → extract links (doc 01), run items 2/4/8 verdicts per link, push follows; run
+body → extract links (doc 01, two-pass when `beforeExtract` is set — see below), run
+items 2/4/8 verdicts per link, push follows; run
 `onPage`; build `PageResult`; `await channel.push(result)` (parks when the consumer is
 slow — this plus invariant 1 is the whole backpressure story); `frontier.ack(url)`;
 `visited.add(...)`; decrement counters; signal the dispatcher.
