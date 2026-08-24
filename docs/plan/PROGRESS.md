@@ -52,7 +52,7 @@ Branch: `sprint-01-foundations`, continued.
 | -- | --------------------------------------------------------------------------- | ------------------------------------- | ------ | --------- |
 | 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5         | ✅     | `abf175b` |
 | 13 | Fake-`FetchFn` helper + mini-site + engine tests                            | [05](./05-testing-docs-release.md) #3 | ✅     | `2093bfb` |
-| 14 | robots.txt enforcement gate + directives                                    | [02](./02-crawl-engine.md) #4         | ✅     | `4160614` |
+| 14 | robots.txt enforcement gate + directives                                    | [02](./02-crawl-engine.md) #4         | ✅     | `8912847` |
 
 ## Backlog (ranked, post-sprint)
 
