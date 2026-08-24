@@ -18,7 +18,7 @@ Branch: `sprint-01-foundations`
 |---|------|--------|--------|--------|
 | 1 | `normalizeUrl` pipeline + `NormalizeOptions` | [01](./01-url-and-extraction.md) #3 | ✅ | — |
 | 2 | `isSameSite` + registrable-domain heuristic + `classifyLink` | [01](./01-url-and-extraction.md) #1 | ✅ | — |
-| 3 | `./url` unit-test corpora (incl. idempotency property test) | [01](./01-url-and-extraction.md) #5 | ⬜ | — |
+| 3 | `./url` unit-test corpora (incl. idempotency property test) | [01](./01-url-and-extraction.md) #5 | ✅ | — |
 | 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1 | ⬜ | — |
 | 5 | deno.json: exports map, imports, publish exclude, test task | [05](./05-testing-docs-release.md) #1 | ⬜ | — |
 
@@ -104,6 +104,38 @@ Branch: `sprint-01-foundations`
   `stripWww` removes ALL leading `www.` labels, not one each. The "drop one" spellings
   need two passes to reach a fixed point on `/dir///` (with `collapseSlashes: false`)
   and on `www.www.a.com`. (task 1)
+- **2026-08-24** — `isSameSite` scope modes are MONOTONE: `"same-site"` falls back to
+  host equality when a host has no registrable domain. Doc 01 spec'd `null => false`,
+  which would make a crawl seeded at a bare public suffix — or at `localhost` under an
+  injected strict-PSL resolver — treat its own seed host as external and follow nothing.
+  The fallback only ever accepts exact same-host pairs, so it cannot widen scope beyond
+  `"same-host"`. Found by the task-3 property test. (task 3)
+- **2026-08-24** — The `./url` fixture corpus is loaded via a STATIC JSON import rather
+  than `Deno.readTextFile`. Static imports are part of the module graph and need no
+  `--allow-read`, so the `./url` suite runs standalone under the current bare
+  `deno test` task instead of waiting for doc 05's `deno test -A`. (task 3)
+- **2026-08-24** — `normalizeUrl` gained a step 12 REASSEMBLY GUARD: for any scheme
+  outside `http:`/`https:` (reachable only by widening `allowSchemes`) the assembled
+  string is re-parsed and rejected unless every component survives verbatim. The manual
+  step-10 join is not the WHATWG serializer, and three confirmed classes broke it —
+  opaque paths keeping raw spaces (`mailto:`, `data:`), a non-numeric `url.port`
+  (`git:/.//x` → `git::./x`), and a `file:` path whose first segment reads as a Windows
+  drive letter (silently dropping the host). The guard is gated on the scheme, so the
+  http(s) hot path stays at exactly one `URL` parse. (task 3, adversarial review)
+- **2026-08-24** — The DNS root label is dropped from the host unconditionally
+  (`a.com.` → `a.com`), in `normalizeUrl` AND in `./url`'s host comparison. WHATWG keeps
+  it, so without this one server is two frontier keys and `same-host` calls a page
+  off-site from itself. Not toggleable — it is a host-identity fact, not a policy.
+  (task 3, adversarial review)
+- **2026-08-24** — Trailing-slash stripping and the root-label strip are hand-written
+  scans, not regexes: `/\/+$/` backtracks quadratically on a long slash run that does
+  not end in a slash (~20s of blocked event loop for a 200k-slash href, and the length
+  cap runs too late to help). A hostile `href` is attacker-controlled input on every
+  crawl, so this was a real DoS. Pinned by a linearity test. (task 3, adversarial review)
+- **2026-08-24** — An injected `getRegistrableDomain` is called defensively: a throw, or
+  any return that is not a non-empty string, is treated as "no registrable domain". It is
+  the only foreign code these otherwise-pure modules run, and an `undefined` return would
+  otherwise have compared equal and made every host same-site. (task 3, adversarial review)
 - **2026-08-24** — Design-sketch deviations (synthesis, per verified constraints):
   default fetcher is the HTTP adapter (browser drivers are injected, never bundled);
   `checkpoint()`/`checkpointEvery` dropped; SQLite dropped; `maxTotalBytes` rename;

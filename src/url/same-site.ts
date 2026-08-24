@@ -14,7 +14,8 @@
  * - `"same-host"` — exact hostname equality (the crawler's default; `blog.a.com` is a
  *   different host than `a.com`)
  * - `"same-site"` — equal registrable domains (`blog.a.com` and `a.com` match)
- * - `"any"` — anywhere, as long as both URLs parse
+ * - `"any"` — anywhere, as long as both URLs parse *and* have a host (a `mailto:` or
+ *   `javascript:` target is never in scope for a crawler)
  */
 export type SubdomainsMode = "same-host" | "same-site" | "any";
 
@@ -29,6 +30,9 @@ export interface SameSiteOptions {
 	 *
 	 * Default: the built-in {@linkcode getRegistrableDomain} heuristic. Inject a real
 	 * PSL-backed implementation when you need exactness — see the caveat there.
+	 *
+	 * It is called defensively: a throw, or any return that is not a non-empty string,
+	 * is treated as "no registrable domain" rather than propagated.
 	 */
 	getRegistrableDomain?: (host: string) => string | null;
 }
@@ -121,11 +125,36 @@ export function getRegistrableDomain(host: string): string | null {
 	return labels.slice(-needed).join(".");
 }
 
-/** Hostname of a URL-ish value, or `null` when it has none (unparsable, or opaque). */
+/**
+ * Hostname of a URL-ish value, or `null` when it has none (unparsable, or opaque).
+ * The DNS root label is dropped, matching what `normalizeUrl` writes into the
+ * frontier — otherwise `https://a.com./x` would be off-site from `https://a.com/x`.
+ */
 function hostnameOf(value: string | URL): string | null {
 	try {
 		const url = value instanceof URL ? value : new URL(String(value));
-		return url.hostname === "" ? null : url.hostname;
+		if (url.hostname === "") return null;
+		let end = url.hostname.length;
+		while (end > 0 && url.hostname.charCodeAt(end - 1) === 0x2e) end--;
+		return end === 0 ? url.hostname : url.hostname.slice(0, end);
+	} catch {
+		return null;
+	}
+}
+
+/**
+ * Run a caller-supplied registrable-domain resolver without letting it break this
+ * module's never-throws contract, and normalize anything that is not a non-empty
+ * string to `null` — a resolver returning `undefined` for two different hosts would
+ * otherwise compare equal and make every host same-site.
+ */
+function resolveRegistrable(
+	resolve: (host: string) => string | null,
+	host: string,
+): string | null {
+	try {
+		const result = resolve(host);
+		return typeof result === "string" && result !== "" ? result : null;
 	} catch {
 		return null;
 	}
@@ -139,6 +168,11 @@ function hostnameOf(value: string | URL): string | null {
  *
  * Comparison is host-only: scheme and port are ignored, so `http://a.com` and
  * `https://a.com:8443` are the same site.
+ *
+ * The modes are monotone: whatever `"same-host"` accepts, `"same-site"` accepts, and
+ * whatever `"same-site"` accepts, `"any"` accepts. In particular a host with no
+ * registrable domain at all (a bare public suffix, or anything an injected PSL does
+ * not know) still matches itself under `"same-site"`.
  *
  * @example
  * ```ts
@@ -162,9 +196,14 @@ export function isSameSite(
 			return true;
 		case "same-site": {
 			const resolve = opts?.getRegistrableDomain ?? getRegistrableDomain;
-			const regA = resolve(hostA);
-			const regB = resolve(hostB);
-			return regA !== null && regB !== null && regA === regB;
+			const regA = resolveRegistrable(resolve, hostA);
+			const regB = resolveRegistrable(resolve, hostB);
+			// No registrable domain (a bare public suffix, or anything an injected
+			// PSL does not recognise) falls back to host equality. Widening the mode
+			// must never put FEWER urls in scope than "same-host" would — otherwise a
+			// crawl seeded at such a host would follow nothing at all.
+			if (regA === null || regB === null) return hostA === hostB;
+			return regA === regB;
 		}
 		case "same-host":
 		default:

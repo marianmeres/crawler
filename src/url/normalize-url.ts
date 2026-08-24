@@ -146,6 +146,32 @@ export function canonPercentEncoding(s: string): string {
 	return out;
 }
 
+/**
+ * Drop the DNS root label(s) from a hostname (`a.com.` → `a.com`). Written as a scan
+ * rather than `/\.+$/` so a hostile all-dots host cannot make it backtrack. A host
+ * that is nothing but dots is left alone — emitting an empty host would change which
+ * resource the url addresses.
+ */
+function stripRootDots(hostname: string): string {
+	let end = hostname.length;
+	while (end > 0 && hostname.charCodeAt(end - 1) === 0x2e) end--;
+	return end === 0 ? hostname : hostname.slice(0, end);
+}
+
+/**
+ * Drop every trailing `/` from a path, collapsing a slash-only path back to the root.
+ * All of them, not just one: `"/a///"` must reach its fixed point in a single pass
+ * even when `collapseSlashes` is off. A scan rather than `/\/+$/`, which backtracks
+ * quadratically on a long slash run that does not end in a slash — reachable from any
+ * hostile href, and the length cap runs too late to help.
+ */
+function stripTrailingSlashes(pathname: string): string {
+	let end = pathname.length;
+	while (end > 0 && pathname.charCodeAt(end - 1) === 0x2f) end--;
+	if (end === pathname.length) return pathname;
+	return end === 0 ? "/" : pathname.slice(0, end);
+}
+
 function normalizeSchemeToken(s: string): string {
 	const t = s.trim().toLowerCase();
 	return t.endsWith(":") ? t : t + ":";
@@ -191,7 +217,15 @@ function matchesStripParam(
  * Step 3 is what `new URL()` does for us and what therefore *cannot* be turned off:
  * scheme and host lowercasing, IDNA/punycode (`münchen.de` → `xn--mnchen-3ya.de`),
  * default-port stripping (`:80` / `:443`), and `.` / `..` dot-segment resolution
- * (including its `%2e`-encoded spellings).
+ * (including its `%2e`-encoded spellings). One host step the parser stops short of is
+ * also unconditional: the DNS root label is dropped (`a.com.` → `a.com`), because it
+ * is not part of a page's identity and keeping it would split one server into two
+ * frontier keys.
+ *
+ * Schemes outside `http:`/`https:` — reachable only by widening
+ * {@linkcode NormalizeOptions.allowSchemes} — additionally have their reassembled
+ * output re-read and verified; anything the URL parser would interpret differently
+ * from what was assembled is rejected as `null` rather than returned unstable.
  *
  * Idempotency — `normalizeUrl(normalizeUrl(x)) === normalizeUrl(x)` — is a required
  * property and is proven by construction, see the note at the bottom of this file.
@@ -260,9 +294,12 @@ export function normalizeUrl(
 		hash = canonPercentEncoding(hash);
 	}
 
-	// 5. www. Every leading `www.` label goes, not just one — otherwise
-	//    `www.www.a.com` would need two passes to reach a fixed point.
-	let hostname = url.hostname;
+	// 5. host. The DNS root label is not part of the identity of a page, and the
+	//    WHATWG parser keeps it, so `a.com.` and `a.com` would otherwise be two
+	//    frontier keys for one server. Then the www policy: every leading `www.`
+	//    label goes, not just one — otherwise `www.www.a.com` would need two passes
+	//    to reach a fixed point.
+	let hostname = stripRootDots(url.hostname);
 	if (stripWww) {
 		while (hostname.startsWith("www.")) {
 			const rest = hostname.slice(4);
@@ -279,11 +316,9 @@ export function normalizeUrl(
 	// 7. slash runs (a literal `%2F` is a triplet and is never touched)
 	if (collapseSlashes) pathname = pathname.replace(/\/{2,}/g, "/");
 
-	// 8. trailing slash. All trailing slashes go, not just one — otherwise `///`
-	//    would need three passes to reach a fixed point when `collapseSlashes` is off.
+	// 8. trailing slash
 	if (trailingSlash === "strip" && pathname !== "") {
-		const stripped = pathname.replace(/\/+$/, "");
-		pathname = stripped === "" ? "/" : stripped;
+		pathname = stripTrailingSlashes(pathname);
 	}
 
 	// 9. query
@@ -320,6 +355,36 @@ export function normalizeUrl(
 
 	// 11. length cap
 	if (out.length > maxLength) return null;
+
+	// 12. reassembly guard. Our step-10 join is not the WHATWG serializer; for
+	//     http(s) the two provably agree, but a scheme a caller opted into via
+	//     `allowSchemes` can break the join in ways that silently change which
+	//     resource is addressed — an opaque path that keeps raw spaces (`mailto:`,
+	//     `data:`), a non-numeric `url.port` (`git:/.//x`), a `file:` path whose
+	//     first segment looks like a Windows drive letter and drops the host. So for
+	//     those schemes only, re-read our own output and refuse it unless every
+	//     component survived. The hot path stays at exactly one `URL` parse.
+	if (url.protocol !== "http:" && url.protocol !== "https:") {
+		let roundTrip: URL;
+		try {
+			roundTrip = new URL(out);
+		} catch {
+			return null;
+		}
+		if (
+			roundTrip.protocol !== url.protocol ||
+			roundTrip.username !== url.username ||
+			roundTrip.password !== url.password ||
+			roundTrip.hostname !== hostname ||
+			roundTrip.port !== url.port ||
+			roundTrip.pathname !== pathname ||
+			roundTrip.search !== search ||
+			roundTrip.hash !== hash
+		) {
+			return null;
+		}
+	}
+
 	return out;
 }
 
@@ -346,6 +411,15 @@ export function normalizeUrl(
  * - Query: re-parsing the serialized query yields the same name/value pairs in the
  *   same order, and sorting an already sorted list is a no-op.
  * - Length: a fixed point cannot grow past the cap it already passed.
+ * - Host: the root-label and `www.` steps are loops, so they leave no match behind,
+ *   and neither can re-introduce a label it removed.
+ *
+ * That argument is specific to hierarchical, authority-bearing urls — which is all
+ * `http:`/`https:` can be. Widen `allowSchemes` and it stops holding: an opaque path
+ * (`mailto:`, `data:`) can carry raw whitespace the parser strips, `url.port` is not
+ * necessarily numeric, and `file:` re-reads a leading drive-letter segment as a
+ * reason to drop the host. Step 12 therefore re-parses the output for every
+ * non-http(s) scheme and rejects whatever does not survive verbatim.
  *
  * The property test in `tests/url/normalize-url-property.test.ts` checks this over a
  * seeded corpus rather than trusting the argument alone.

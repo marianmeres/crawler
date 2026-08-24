@@ -1,5 +1,6 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
 import {
+	classifyLink,
 	getRegistrableDomain,
 	isSameSite,
 	SECOND_LEVEL_LABELS,
@@ -126,8 +127,14 @@ Deno.test("isSameSite: same-site mode", async (t) => {
 			isSameSite("https://example.co.uk/", "https://example.org.uk/", opts),
 		);
 	});
-	await t.step("bare public suffixes never match", () => {
-		assertFalse(isSameSite("https://co.uk/", "https://co.uk/", opts));
+	await t.step("a host with no registrable domain still matches itself", () => {
+		// widening the mode must never narrow the scope
+		assert(isSameSite("https://co.uk/", "https://co.uk/", opts));
+		assertFalse(isSameSite("https://co.uk/", "https://gov.sk/", opts));
+		assert(isSameSite("http://localhost:3000/a", "http://localhost/b", {
+			...opts,
+			getRegistrableDomain: () => null, // a strict PSL knows nothing about localhost
+		}));
 	});
 	await t.step("IP literals fall back to host equality", () => {
 		assert(isSameSite("https://127.0.0.1:8080/", "https://127.0.0.1/", opts));
@@ -166,5 +173,53 @@ Deno.test("isSameSite: unusable input is never the same site", async (t) => {
 	await t.step("accepts URL instances as well as strings", () => {
 		assert(isSameSite(new URL("https://a.com/x"), new URL("https://a.com/y")));
 		assert(isSameSite(new URL("https://a.com/x"), "https://a.com/y"));
+	});
+});
+
+Deno.test("isSameSite: the DNS root label is not part of the host", async (t) => {
+	await t.step("matches what normalizeUrl writes into the frontier", () => {
+		assert(isSameSite("https://a.com./x", "https://a.com/y"));
+		assert(isSameSite("https://a.com../x", "https://a.com/y"));
+		assertEquals(classifyLink("https://a.com./x", "https://a.com/y"), "internal");
+	});
+	await t.step("and under same-site too", () => {
+		assert(isSameSite("https://blog.a.com./x", "https://a.com/y", {
+			subdomains: "same-site",
+		}));
+	});
+});
+
+Deno.test("isSameSite: an injected resolver cannot break the contract", async (t) => {
+	const opts = { subdomains: "same-site" } as const;
+	await t.step("a throwing resolver degrades to host equality", () => {
+		const boom = () => {
+			throw new Error("psl unavailable");
+		};
+		assertFalse(isSameSite("https://a.com/", "https://b.com/", {
+			...opts,
+			getRegistrableDomain: boom,
+		}));
+		assert(isSameSite("https://a.com/", "https://a.com/", {
+			...opts,
+			getRegistrableDomain: boom,
+		}));
+	});
+	await t.step("a resolver returning junk never makes hosts equal", () => {
+		for (
+			const junk of [
+				() => undefined as unknown as string,
+				() => "",
+				() => ({}) as unknown as string,
+				() => 42 as unknown as string,
+			]
+		) {
+			assertFalse(
+				isSameSite("https://a.com/", "https://b.com/", {
+					...opts,
+					getRegistrableDomain: junk,
+				}),
+				`junk resolver made two hosts same-site`,
+			);
+		}
 	});
 });

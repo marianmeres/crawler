@@ -1,0 +1,927 @@
+{
+	"$comment": "Table-driven corpus for normalizeUrl. `base` and `opts` are optional; `expected: null` means the input is rejected. Every non-null expectation is additionally asserted to be a fixed point (re-normalizing it changes nothing). Cases needing a RegExp option live inline in tests/url/normalize-url.test.ts instead, since JSON cannot express one.",
+	"cases": [
+		{
+			"group": "whatwg-inherent",
+			"name": "lowercases scheme and host, keeps path case",
+			"input": "HTTPS://Ex.COM/A",
+			"expected": "https://ex.com/A"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "punycodes an IDN host",
+			"input": "https://MÜNCHEN.de/",
+			"expected": "https://xn--mnchen-3ya.de/"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "leaves an already punycoded host alone",
+			"input": "https://xn--mnchen-3ya.de/",
+			"expected": "https://xn--mnchen-3ya.de/"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "strips the default http port",
+			"input": "http://a.com:80/x",
+			"expected": "http://a.com/x"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "strips the default https port",
+			"input": "https://a.com:443/x",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "keeps a non-default port",
+			"input": "https://a.com:8080/x",
+			"expected": "https://a.com:8080/x"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "resolves literal dot segments",
+			"input": "https://a.com/a/b/../../c/./d",
+			"expected": "https://a.com/c/d"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "resolves percent-encoded dot segments",
+			"input": "https://a.com/a/%2e%2e/b",
+			"expected": "https://a.com/b"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "dot segments cannot escape the root",
+			"input": "https://a.com/../../x",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "materializes the root path",
+			"input": "https://a.com",
+			"expected": "https://a.com/"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "backslashes are path separators",
+			"input": "https://a.com/a\\b",
+			"expected": "https://a.com/a/b"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "tabs and newlines are removed",
+			"input": "https://a.com/x\ty\nz",
+			"expected": "https://a.com/xyz"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "surrounding whitespace is trimmed",
+			"input": "  https://a.com/x  ",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "keeps a bracketed IPv6 host",
+			"input": "https://[::1]:8080/x",
+			"expected": "https://[::1]:8080/x"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "strips the default port from an IPv6 host",
+			"input": "https://[::1]:443/x",
+			"expected": "https://[::1]/x"
+		},
+		{
+			"group": "whatwg-inherent",
+			"name": "canonicalizes an odd IPv4 spelling",
+			"input": "https://0x7f.1/",
+			"expected": "https://127.0.0.1/"
+		},
+		{
+			"group": "root-dot",
+			"name": "drops the DNS root label",
+			"input": "https://a.com./x",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "root-dot",
+			"name": "drops repeated root labels",
+			"input": "https://a.com../x",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "root-dot",
+			"name": "keeps the port",
+			"input": "https://a.com.:8080/x",
+			"expected": "https://a.com:8080/x"
+		},
+		{
+			"group": "root-dot",
+			"name": "runs before the www policy",
+			"input": "https://www.a.com./x",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "root-dot",
+			"name": "a host that is nothing but dots is left alone",
+			"input": "https://./x",
+			"expected": "https://./x"
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects mailto:",
+			"input": "mailto:a@b.com",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects tel:",
+			"input": "tel:+421900000000",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects javascript:",
+			"input": "javascript:alert(1)",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects data:",
+			"input": "data:text/plain,hi",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects blob:",
+			"input": "blob:https://a.com/uuid",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects sms:",
+			"input": "sms:+421900000000",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects ftp:",
+			"input": "ftp://a.com/x",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects about:",
+			"input": "about:blank",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects ws:",
+			"input": "ws://a.com/x",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "rejects file:",
+			"input": "file:///a/b",
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "allow-list can be widened",
+			"input": "ftp://a.com/x",
+			"opts": {
+				"allowSchemes": [
+					"ftp:"
+				]
+			},
+			"expected": "ftp://a.com/x"
+		},
+		{
+			"group": "scheme-gate",
+			"name": "allow-list entries tolerate a missing colon",
+			"input": "ftp://a.com/x",
+			"opts": {
+				"allowSchemes": [
+					"ftp"
+				]
+			},
+			"expected": "ftp://a.com/x"
+		},
+		{
+			"group": "scheme-gate",
+			"name": "allow-list entries are case-insensitive",
+			"input": "FTP://A.com/x",
+			"opts": {
+				"allowSchemes": [
+					"FTP:"
+				]
+			},
+			"expected": "ftp://a.com/x"
+		},
+		{
+			"group": "scheme-gate",
+			"name": "widening the list also narrows it",
+			"input": "https://a.com/x",
+			"opts": {
+				"allowSchemes": [
+					"ftp:"
+				]
+			},
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "an empty authority survives reassembly",
+			"input": "file:///a/b",
+			"opts": {
+				"allowSchemes": [
+					"file:"
+				]
+			},
+			"expected": "file:///a/b"
+		},
+		{
+			"group": "scheme-gate",
+			"name": "ftp still normalizes normally",
+			"input": "ftp://a.com/x/",
+			"opts": {
+				"allowSchemes": [
+					"ftp:"
+				]
+			},
+			"expected": "ftp://a.com/x"
+		},
+		{
+			"group": "scheme-gate",
+			"name": "an opaque path that round-trips is kept",
+			"input": "mailto:a@b.com",
+			"opts": {
+				"allowSchemes": [
+					"mailto:"
+				]
+			},
+			"expected": "mailto:a@b.com"
+		},
+		{
+			"group": "scheme-gate",
+			"name": "an opaque path that would not round-trip is refused",
+			"input": "mailto:a@b.com #frag",
+			"opts": {
+				"allowSchemes": [
+					"mailto:"
+				]
+			},
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "a data: url whose opaque path keeps a space is refused",
+			"input": "data:text/plain,hi #z",
+			"opts": {
+				"allowSchemes": [
+					"data:"
+				]
+			},
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "a non-numeric port on a non-special scheme is refused",
+			"input": "git:/.//x",
+			"opts": {
+				"allowSchemes": [
+					"git:"
+				]
+			},
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "a file: drive letter that would drop the host is refused",
+			"input": "file://host/%43:",
+			"opts": {
+				"allowSchemes": [
+					"file:"
+				]
+			},
+			"expected": null
+		},
+		{
+			"group": "scheme-gate",
+			"name": "a file: path the parser itself rewrites is refused",
+			"input": "file://host//C:/x",
+			"opts": {
+				"allowSchemes": [
+					"file:"
+				]
+			},
+			"expected": null
+		},
+		{
+			"group": "fragment",
+			"name": "stripped by default",
+			"input": "https://a.com/x#top",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "fragment",
+			"name": "kept when stripping is disabled",
+			"input": "https://a.com/x#top",
+			"opts": {
+				"stripFragment": false
+			},
+			"expected": "https://a.com/x#top"
+		},
+		{
+			"group": "fragment",
+			"name": "an empty fragment never survives",
+			"input": "https://a.com/x#",
+			"opts": {
+				"stripFragment": false
+			},
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "fragment",
+			"name": "keepHashbang keeps a #! route",
+			"input": "https://a.com/x#!/route",
+			"opts": {
+				"keepHashbang": true
+			},
+			"expected": "https://a.com/x#!/route"
+		},
+		{
+			"group": "fragment",
+			"name": "keepHashbang still strips an ordinary fragment",
+			"input": "https://a.com/x#top",
+			"opts": {
+				"keepHashbang": true
+			},
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "fragment",
+			"name": "a kept fragment is encoding-canonicalized",
+			"input": "https://a.com/x#%7ea",
+			"opts": {
+				"stripFragment": false
+			},
+			"expected": "https://a.com/x#~a"
+		},
+		{
+			"group": "fragment",
+			"name": "a kept fragment keeps its own escapes",
+			"input": "https://a.com/x#a b",
+			"opts": {
+				"stripFragment": false
+			},
+			"expected": "https://a.com/x#a%20b"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "decodes unreserved bytes",
+			"input": "https://a.com/%7Ex%2Dy%5Fz%2Ew",
+			"expected": "https://a.com/~x-y_z.w"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "uppercases every other triplet",
+			"input": "https://a.com/a%2fb%3ac",
+			"expected": "https://a.com/a%2Fb%3Ac"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "keeps multi-byte sequences encoded",
+			"input": "https://a.com/%c3%a9",
+			"expected": "https://a.com/%C3%A9"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "encodes a literal non-ASCII path character",
+			"input": "https://a.com/é",
+			"expected": "https://a.com/%C3%A9"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "repairs a trailing stray percent",
+			"input": "https://a.com/100%",
+			"expected": "https://a.com/100%25"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "repairs a truncated triplet",
+			"input": "https://a.com/a%2",
+			"expected": "https://a.com/a%252"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "repairs an invalid triplet",
+			"input": "https://a.com/a%zz",
+			"expected": "https://a.com/a%25zz"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "leaves an already encoded percent alone",
+			"input": "https://a.com/%25",
+			"expected": "https://a.com/%25"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "can be disabled",
+			"input": "https://a.com/%7Ex%2fy",
+			"opts": {
+				"normalizeEncoding": false
+			},
+			"expected": "https://a.com/%7Ex%2fy"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "decoded dots do not become dot segments",
+			"input": "https://a.com/a/%2e%2e%2e/b",
+			"expected": "https://a.com/a/.../b"
+		},
+		{
+			"group": "percent-encoding",
+			"name": "an encoded slash is never a separator",
+			"input": "https://a.com/a%2F%2Fb",
+			"expected": "https://a.com/a%2F%2Fb"
+		},
+		{
+			"group": "path-shape",
+			"name": "collapses slash runs",
+			"input": "https://a.com//a///b",
+			"expected": "https://a.com/a/b"
+		},
+		{
+			"group": "path-shape",
+			"name": "collapsing can be disabled",
+			"input": "https://a.com//a///b",
+			"opts": {
+				"collapseSlashes": false
+			},
+			"expected": "https://a.com//a///b"
+		},
+		{
+			"group": "path-shape",
+			"name": "strips a trailing slash",
+			"input": "https://a.com/dir/",
+			"expected": "https://a.com/dir"
+		},
+		{
+			"group": "path-shape",
+			"name": "never strips the root",
+			"input": "https://a.com/",
+			"expected": "https://a.com/"
+		},
+		{
+			"group": "path-shape",
+			"name": "a slash-only path settles on the root",
+			"input": "https://a.com//",
+			"expected": "https://a.com/"
+		},
+		{
+			"group": "path-shape",
+			"name": "strips a trailing slash in front of a query",
+			"input": "https://a.com/dir/?a=1",
+			"expected": "https://a.com/dir?a=1"
+		},
+		{
+			"group": "path-shape",
+			"name": "trailing slash can be kept",
+			"input": "https://a.com/dir/",
+			"opts": {
+				"trailingSlash": "keep"
+			},
+			"expected": "https://a.com/dir/"
+		},
+		{
+			"group": "path-shape",
+			"name": "keeping does not add one",
+			"input": "https://a.com/dir",
+			"opts": {
+				"trailingSlash": "keep"
+			},
+			"expected": "https://a.com/dir"
+		},
+		{
+			"group": "path-shape",
+			"name": "all trailing slashes go in one pass",
+			"input": "https://a.com/dir///",
+			"opts": {
+				"collapseSlashes": false
+			},
+			"expected": "https://a.com/dir"
+		},
+		{
+			"group": "path-shape",
+			"name": "a slash-only path settles even without collapsing",
+			"input": "https://a.com///",
+			"opts": {
+				"collapseSlashes": false
+			},
+			"expected": "https://a.com/"
+		},
+		{
+			"group": "query",
+			"name": "strips tracking params and sorts the rest",
+			"input": "https://Ex.com/a?utm_source=x&b=2&a=1",
+			"expected": "https://ex.com/a?a=1&b=2"
+		},
+		{
+			"group": "query",
+			"name": "param names are matched case-insensitively",
+			"input": "https://a.com/x?FBCLID=1&keep=2",
+			"expected": "https://a.com/x?keep=2"
+		},
+		{
+			"group": "query",
+			"name": "strips a session id",
+			"input": "https://a.com/x?PHPSESSID=abc&a=1",
+			"expected": "https://a.com/x?a=1"
+		},
+		{
+			"group": "query",
+			"name": "strips ref",
+			"input": "https://a.com/x?ref=nav&a=1",
+			"expected": "https://a.com/x?a=1"
+		},
+		{
+			"group": "query",
+			"name": "sorting is stable for repeated names",
+			"input": "https://a.com/x?b=1&a=2&a=1",
+			"expected": "https://a.com/x?a=2&a=1&b=1"
+		},
+		{
+			"group": "query",
+			"name": "sorting can be disabled",
+			"input": "https://a.com/x?b=1&a=2",
+			"opts": {
+				"sortParams": false
+			},
+			"expected": "https://a.com/x?b=1&a=2"
+		},
+		{
+			"group": "query",
+			"name": "empty values are kept by default",
+			"input": "https://a.com/x?a=&b=1",
+			"expected": "https://a.com/x?a=&b=1"
+		},
+		{
+			"group": "query",
+			"name": "empty values can be dropped",
+			"input": "https://a.com/x?a=&b=1",
+			"opts": {
+				"stripEmptyParams": true
+			},
+			"expected": "https://a.com/x?b=1"
+		},
+		{
+			"group": "query",
+			"name": "a valueless param gains its equals sign",
+			"input": "https://a.com/x?flag",
+			"expected": "https://a.com/x?flag="
+		},
+		{
+			"group": "query",
+			"name": "a valueless param counts as empty",
+			"input": "https://a.com/x?flag&a=1",
+			"opts": {
+				"stripEmptyParams": true
+			},
+			"expected": "https://a.com/x?a=1"
+		},
+		{
+			"group": "query",
+			"name": "an empty query loses its question mark",
+			"input": "https://a.com/x?",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "query",
+			"name": "a fully stripped query loses its question mark",
+			"input": "https://a.com/x?utm_source=x",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "query",
+			"name": "spaces canonicalize to plus",
+			"input": "https://a.com/x?q=a b&r=c%20d",
+			"expected": "https://a.com/x?q=a+b&r=c+d"
+		},
+		{
+			"group": "query",
+			"name": "an existing plus round-trips",
+			"input": "https://a.com/x?q=a+b",
+			"expected": "https://a.com/x?q=a+b"
+		},
+		{
+			"group": "query",
+			"name": "form encoding escapes a tilde",
+			"input": "https://a.com/x?q=~",
+			"expected": "https://a.com/x?q=%7E"
+		},
+		{
+			"group": "query",
+			"name": "reserved characters stay escaped",
+			"input": "https://a.com/x?q=a%26b",
+			"expected": "https://a.com/x?q=a%26b"
+		},
+		{
+			"group": "query",
+			"name": "non-ASCII values are utf-8 percent-encoded",
+			"input": "https://a.com/x?q=é",
+			"expected": "https://a.com/x?q=%C3%A9"
+		},
+		{
+			"group": "query",
+			"name": "the raw query survives when normalization is off",
+			"input": "https://a.com/x?utm_source=1&b=2&a=1",
+			"opts": {
+				"normalizeQuery": false
+			},
+			"expected": "https://a.com/x?utm_source=1&b=2&a=1"
+		},
+		{
+			"group": "query",
+			"name": "a raw query is still encoding-canonicalized",
+			"input": "https://a.com/x?q=%7e",
+			"opts": {
+				"normalizeQuery": false
+			},
+			"expected": "https://a.com/x?q=~"
+		},
+		{
+			"group": "query",
+			"name": "a custom string blocklist replaces the default",
+			"input": "https://a.com/x?a=1&b=2&utm_source=3",
+			"opts": {
+				"stripParams": [
+					"a"
+				]
+			},
+			"expected": "https://a.com/x?b=2&utm_source=3"
+		},
+		{
+			"group": "query",
+			"name": "an empty blocklist keeps everything",
+			"input": "https://a.com/x?utm_source=1",
+			"opts": {
+				"stripParams": []
+			},
+			"expected": "https://a.com/x?utm_source=1"
+		},
+		{
+			"group": "www",
+			"name": "kept by default",
+			"input": "https://www.a.com/x",
+			"expected": "https://www.a.com/x"
+		},
+		{
+			"group": "www",
+			"name": "stripped on request",
+			"input": "https://www.a.com/x",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "www",
+			"name": "never stripped down to a single label",
+			"input": "https://www.com/x",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://www.com/x"
+		},
+		{
+			"group": "www",
+			"name": "repeated leading labels all go",
+			"input": "https://www.www.a.com/x",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "www",
+			"name": "only a leading label counts",
+			"input": "https://a.www.com/x",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://a.www.com/x"
+		},
+		{
+			"group": "www",
+			"name": "www2 is a different label",
+			"input": "https://www2.a.com/x",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://www2.a.com/x"
+		},
+		{
+			"group": "www",
+			"name": "stripping keeps the port",
+			"input": "https://www.a.com:8080/x",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://a.com:8080/x"
+		},
+		{
+			"group": "base-resolution",
+			"name": "resolves a relative reference",
+			"input": "../b?x=1#f",
+			"base": "https://ex.com/p/q/r",
+			"expected": "https://ex.com/p/b?x=1"
+		},
+		{
+			"group": "base-resolution",
+			"name": "resolves an absolute path",
+			"input": "/abs",
+			"base": "https://ex.com/p/q",
+			"expected": "https://ex.com/abs"
+		},
+		{
+			"group": "base-resolution",
+			"name": "resolves a protocol-relative reference",
+			"input": "//other.com/x",
+			"base": "https://ex.com/p",
+			"expected": "https://other.com/x"
+		},
+		{
+			"group": "base-resolution",
+			"name": "resolves a query-only reference",
+			"input": "?a=1",
+			"base": "https://ex.com/p/q",
+			"expected": "https://ex.com/p/q?a=1"
+		},
+		{
+			"group": "base-resolution",
+			"name": "resolves a fragment-only reference",
+			"input": "#f",
+			"base": "https://ex.com/p/q",
+			"expected": "https://ex.com/p/q"
+		},
+		{
+			"group": "base-resolution",
+			"name": "an absolute input ignores the base",
+			"input": "https://a.com/x",
+			"base": "https://ex.com/p",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "base-resolution",
+			"name": "a schemeless input is a relative path, not a host",
+			"input": "example.com/x",
+			"base": "https://ex.com/p/q",
+			"expected": "https://ex.com/p/example.com/x"
+		},
+		{
+			"group": "base-resolution",
+			"name": "never guesses a scheme without a base",
+			"input": "example.com/x",
+			"expected": null
+		},
+		{
+			"group": "base-resolution",
+			"name": "a blank base behaves like no base",
+			"input": "https://a.com/x",
+			"base": "",
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "base-resolution",
+			"name": "a relative reference needs a real base",
+			"input": "/x",
+			"base": "   ",
+			"expected": null
+		},
+		{
+			"group": "base-resolution",
+			"name": "an unparsable base yields null",
+			"input": "/x",
+			"base": "not a url",
+			"expected": null
+		},
+		{
+			"group": "base-resolution",
+			"name": "the scheme gate also applies to the resolved result",
+			"input": "/x",
+			"base": "ftp://a.com/p",
+			"expected": null
+		},
+		{
+			"group": "rejections",
+			"name": "empty input",
+			"input": "",
+			"expected": null
+		},
+		{
+			"group": "rejections",
+			"name": "whitespace-only input",
+			"input": "   ",
+			"expected": null
+		},
+		{
+			"group": "rejections",
+			"name": "a scheme with no host",
+			"input": "http://",
+			"expected": null
+		},
+		{
+			"group": "rejections",
+			"name": "punctuation soup",
+			"input": ":::",
+			"expected": null
+		},
+		{
+			"group": "rejections",
+			"name": "a host that is only a colon",
+			"input": "https://:",
+			"expected": null
+		},
+		{
+			"group": "rejections",
+			"name": "an over-long url",
+			"input": "https://a.com/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+			"opts": {
+				"maxLength": 20
+			},
+			"expected": null
+		},
+		{
+			"group": "rejections",
+			"name": "exactly at the length cap is fine",
+			"input": "https://a.com/x",
+			"opts": {
+				"maxLength": 15
+			},
+			"expected": "https://a.com/x"
+		},
+		{
+			"group": "userinfo",
+			"name": "user and password are kept verbatim",
+			"input": "https://user:pass@a.com/x",
+			"expected": "https://user:pass@a.com/x"
+		},
+		{
+			"group": "userinfo",
+			"name": "a user without a password",
+			"input": "https://user@a.com/x",
+			"expected": "https://user@a.com/x"
+		},
+		{
+			"group": "userinfo",
+			"name": "a password without a user",
+			"input": "https://:pass@a.com/x",
+			"expected": "https://:pass@a.com/x"
+		},
+		{
+			"group": "userinfo",
+			"name": "escapes inside userinfo are preserved",
+			"input": "https://u%3As:p@a.com/x",
+			"expected": "https://u%3As:p@a.com/x"
+		},
+		{
+			"group": "userinfo",
+			"name": "userinfo survives with a port",
+			"input": "https://u:p@a.com:8080/x",
+			"expected": "https://u:p@a.com:8080/x"
+		},
+		{
+			"group": "real-world",
+			"name": "a newsletter link",
+			"input": "https://www.Example.com:443/Blog/Post/?utm_source=nl&utm_medium=email&id=42&_ga=1#comments",
+			"opts": {
+				"stripWww": true
+			},
+			"expected": "https://example.com/Blog/Post?id=42"
+		},
+		{
+			"group": "real-world",
+			"name": "a bare shouted domain",
+			"input": "HTTPS://EXAMPLE.COM",
+			"expected": "https://example.com/"
+		},
+		{
+			"group": "real-world",
+			"name": "a search results page",
+			"input": "https://a.com/search/?q=deno+url&page=2&fbclid=xyz",
+			"expected": "https://a.com/search?page=2&q=deno+url"
+		},
+		{
+			"group": "real-world",
+			"name": "a messy CMS path",
+			"input": "https://a.com//wp-content//uploads/../uploads/x.PDF?ver=1.2&utm_campaign=z",
+			"expected": "https://a.com/wp-content/uploads/x.PDF?ver=1.2"
+		}
+	]
+}
