@@ -558,6 +558,32 @@ Branch: `sprint-01-foundations`, continued.
   other idle path parks on a promise a completion resolves, raced against a single
   `setTimeout`, per doc 02's no-busy-waiting requirement. (task 12)
 
+- **2026-08-24** — **`findCloseTagIndex` ignored its own `limit`**, and it was the same
+  bug as `decodeEntities` one level up: `html.indexOf("</", k)` takes no end argument,
+  so it scanned to the end of the DOCUMENT and the window only got to reject the answer
+  afterwards. `extractLinks` looks up anchor text once per `<a>`, so a page whose
+  anchors are never closed cost O(links × document) — measured **47 s** of blocked event
+  loop on 1.3 MB of markup, against 12 ms for the same page with its anchors closed. The
+  scan is now a bounded `charCodeAt` loop, checked equivalent to the old one over 240 000
+  differential comparisons; the windowed path got 16–70× faster and, more to the point,
+  is now flat in document size. The cost is that the one unbounded caller (the raw-text
+  skip) gives up `indexOf`'s SIMD search — ~85 ms instead of ~2 ms on a 16 MB document,
+  once — which is worth one predictable code path in the function every link goes
+  through. Found by the adversarial review of task 9, not by the fuzz suite: the suite's
+  own "a 1M-character anchor body" step asserted this exact invariant and could not see
+  it, because its single anchor is closed. Pinned now by a growth-rate test that fails at
+  18× against the old code. (task 9, follow-up)
+
+- **2026-08-24** — Three more test defects from the same review, each fixed and each
+  worth naming because they are the failure modes a test suite hides behind:
+  `script-noise.html`'s "a `<` that is arithmetic" step asserted a title that is parsed
+  *before* the `<script>` it claimed to be about (it now asserts the link list, which
+  actually depends on the raw-text skip); `conflicting-precedence.txt`'s "an unmatched
+  path is allowed" used `/plain`, which matches `/p` and is allowed for a completely
+  different reason; and removing the `MAX_REGION_DEPTH` guard outright survived the whole
+  suite, so the cap now has a boundary test (the 64th landmark counts, the 65th does
+  not). (task 9, follow-up)
+
 ## How to resume (for a fresh conversation)
 
 1. Read this file + `00-overview-and-roadmap.md`.

@@ -105,9 +105,19 @@ Deno.test("fixture html/script-noise.html — only real markup is a link", async
 		assert(hrefs("script-noise.html").includes("/from-noscript"));
 	});
 
-	await t.step("a `<` that is arithmetic does not start a tag", () => {
-		// `if (a < b && c > d)` sits inside the <script>, so this also proves the
-		// raw-text skip does not end early on the stray `>`
+	await t.step("a `>` inside script arithmetic does not end the raw-text skip", () => {
+		// `if (a < b && c > d)` sits inside the <script>. The title assertion this
+		// step used to make proved nothing — `<title>` precedes the `<script>`, so
+		// extractTitle returns before it ever gets there. What actually depends on
+		// the skip is the link list: if it ended at that `>`, the assignment right
+		// after it would be scanned as markup.
+		const links = hrefs("script-noise.html");
+		assertFalse(links.some((href) => href.includes("from-script")));
+		// and the scan really did resume afterwards, or /real-2 would be missing
+		assertEquals(links.at(-1), "/real-2");
+	});
+
+	await t.step("the title is read from <head>, before any of that", () => {
 		assertEquals(extractTitle(html("script-noise.html")), "script noise");
 	});
 });
@@ -660,6 +670,10 @@ Deno.test("fixture robots/conflicting-precedence.txt", async (t) => {
 	});
 
 	await t.step("an unmatched path is allowed", () => {
+		// genuinely unmatched: no rule here is a prefix of it and none anchors on it
+		assertEquals(allowed("/about"), true);
+		// `/plain` is NOT that case — it starts with `/p`, so it is allowed because
+		// the equal-length Allow wins, not because nothing matched
 		assertEquals(allowed("/plain"), true);
 	});
 });

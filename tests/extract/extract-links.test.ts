@@ -554,6 +554,31 @@ Deno.test("extractLinks: regions", async (t) => {
 	});
 });
 
+Deno.test("extractLinks: the landmark stack is depth-capped", async (t) => {
+	// Six landmark elements nested 64 deep is not a document, it is an attempt to grow
+	// our stack. Past the cap the innermost-wins rule degrades rather than the memory —
+	// and that degradation is observable, which is what makes the cap testable at all.
+	const nest = (depth: number, innermost: string) =>
+		"<main>".repeat(depth) + `<${innermost}><a href="/x">t</a>`;
+
+	await t.step("the 64th landmark still counts", () => {
+		assertEquals(regions(nest(63, "nav")), ["nav"]);
+	});
+
+	await t.step("the 65th does not — the link keeps the 64th", () => {
+		assertEquals(regions(nest(64, "nav")), ["main"]);
+		assertEquals(regions(nest(5_000, "nav")), ["main"]);
+	});
+
+	await t.step("closing back below the cap makes room again", () => {
+		// the stack is not permanently poisoned: pop one and the next open lands
+		assertEquals(
+			regions("<main>".repeat(64) + "</main>" + `<nav><a href="/x">t</a>`),
+			["nav"],
+		);
+	});
+});
+
 Deno.test("extractLinks: caps and bad input", async (t) => {
 	await t.step("maxLinks drops the tail", () => {
 		const html = Array.from({ length: 10 }, (_, i) => `<a href="/${i}">x</a>`)
@@ -591,6 +616,56 @@ Deno.test("extractLinks: caps and bad input", async (t) => {
 			maxAnchorText: 2.7,
 		});
 		assertEquals(link.anchorText, "he");
+	});
+
+	await t.step("a page of unclosed anchors stays linear in the document", () => {
+		// `findCloseTagIndex` used to search with `indexOf("</", k)`, which takes no
+		// end argument: it scanned to the end of the DOCUMENT and let `limit` reject
+		// the answer afterwards. Since anchor text is looked up once per `<a>`, a page
+		// whose anchors are never closed cost O(links x document) — 47s of blocked
+		// event loop on 1.3 MB of markup, against 12ms for the same page closed.
+		// The window cap now bounds the scan, so growing the document must not move
+		// the number.
+		const timeFor = (tailBytes: number) => {
+			const doc = '<a href="/x">t'.repeat(2_000) + "<b>".repeat(tailBytes / 3 | 0);
+			let best = Infinity;
+			for (let run = 0; run < 2; run++) {
+				const started = performance.now();
+				assertEquals(extractLinks(doc, BASE).length, 2_000);
+				best = Math.min(best, performance.now() - started);
+			}
+			return best;
+		};
+		const small = timeFor(20_000);
+		const large = timeFor(600_000);
+		// the tail carries no links and no `</`, so it is pure document length:
+		// bounded scanning is flat in it, the old unbounded one was ~20x
+		assert(
+			large < 3 * Math.max(small, 1),
+			`a 48 KB page took ${small.toFixed(0)}ms and a 628 KB one ` +
+				`${large.toFixed(0)}ms — the close-tag search is unbounded again`,
+		);
+	});
+
+	await t.step("a close tag only closes an element of exactly that name", () => {
+		// the boundary check inside findCloseTagIndex: "</abbr>" must not end "<a>",
+		// or every anchor followed by an abbreviation loses its text
+		assertEquals(
+			extractLinks(`<a href="/x">see <abbr>HTML</abbr> here</a>`, BASE)[0]
+				.anchorText,
+			"see HTML here",
+		);
+		// `</abbr>` does not end the anchor, so the text runs past it (and the tag
+		// itself is stripped as markup, as any tag inside an anchor is)
+		assertEquals(
+			extractLinks(`<a href="/x">text</abbr>`, BASE)[0].anchorText,
+			"text",
+		);
+		// and a name that merely starts the same is not a match either way round
+		assertEquals(
+			extractTitle(`<title>keep <titlecase>this</titlecase></title>`),
+			"keep this",
+		);
 	});
 
 	await t.step("a run of bare ampersands stays linear", () => {
