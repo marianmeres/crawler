@@ -40,9 +40,9 @@ Branch: `sprint-01-foundations`, continued.
 
 | # | Task | Source | Status | Commit |
 |---|------|--------|--------|--------|
-| 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ✅ | `TBD9` |
-| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ✅ | `TBD10` |
-| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ✅ | `TBD11` |
+| 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ✅ | `33c3d53` |
+| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ✅ | `7a3dd00` |
+| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ✅ | `0778cbb` |
 
 ## Backlog (ranked, post-sprint)
 
