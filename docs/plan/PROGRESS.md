@@ -16,7 +16,7 @@ Branch: `sprint-01-foundations`
 
 | # | Task | Source | Status | Commit |
 |---|------|--------|--------|--------|
-| 1 | `normalizeUrl` pipeline + `NormalizeOptions` | [01](./01-url-and-extraction.md) #3 | ⬜ | — |
+| 1 | `normalizeUrl` pipeline + `NormalizeOptions` | [01](./01-url-and-extraction.md) #3 | ✅ | — |
 | 2 | `isSameSite` + registrable-domain heuristic + `classifyLink` | [01](./01-url-and-extraction.md) #1 | ⬜ | — |
 | 3 | `./url` unit-test corpora (incl. idempotency property test) | [01](./01-url-and-extraction.md) #5 | ⬜ | — |
 | 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1 | ⬜ | — |
@@ -62,9 +62,9 @@ Branch: `sprint-01-foundations`
 
 ## Open questions (collected; resolve with owner before the affected task)
 
-- [01] Userinfo credentials in URLs (`https://user:pass@host/…`): keep in `./url`
-  (lossless) and redact/refuse at enqueue/persist time, or strip/reject in normalize?
-  (affects tasks 1, 12, 23)
+- [01/02] Userinfo credentials in URLs (`https://user:pass@host/…`) — the `./url` half
+  is settled (kept verbatim, see Decisions log). Still open: does the crawl loop REFUSE
+  such URLs at enqueue, REDACT them before persisting, or pass them through? (tasks 12, 23)
 - [02] PG `pop({excludeHosts})` scaling with hundreds of hosts — `<> ALL($1)` vs a
   host-status side table; doc 03's call at implementation. (task 22)
 - [03] `__crawler_url` archive pruning: ship `pruneUrls()` in v1 or leave to consumer
@@ -95,6 +95,15 @@ Branch: `sprint-01-foundations`
   hatch) — owner interview.
 - **2026-08-24** — `tenant_id TEXT NOT NULL DEFAULT '_default'`, cron-3.x style — owner
   interview.
+- **2026-08-24** — [01 open q, `./url` half] `normalizeUrl` KEEPS userinfo verbatim:
+  `./url` is a lossless pure function, so refusing or redacting credentials is an
+  enqueue/persist-time policy decision, not a parsing one. Doc 01's own recommendation
+  adopted; the crawl-loop half of the question stays open above. (task 1)
+- **2026-08-24** — Two doc-01 pipeline steps widened so the REQUIRED idempotency
+  property actually holds: trailing-slash strip removes ALL trailing slashes and
+  `stripWww` removes ALL leading `www.` labels, not one each. The "drop one" spellings
+  need two passes to reach a fixed point on `/dir///` (with `collapseSlashes: false`)
+  and on `www.www.a.com`. (task 1)
 - **2026-08-24** — Design-sketch deviations (synthesis, per verified constraints):
   default fetcher is the HTTP adapter (browser drivers are injected, never bundled);
   `checkpoint()`/`checkpointEvery` dropped; SQLite dropped; `maxTotalBytes` rename;
