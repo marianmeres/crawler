@@ -21,7 +21,7 @@
  */
 
 import type { Fetcher, FetchFn, FetchResult, Logger } from "@marianmeres/page-fetcher";
-import type { ExtractOptions, LinkRegion } from "./extract/types.ts";
+import type { ExtractOptions, LinkRegion, RawLinkRel } from "./extract/types.ts";
 import type {
 	FrontierItem,
 	FrontierStore,
@@ -344,15 +344,7 @@ export type DiscoveredVia = "seed" | "link" | "sitemap" | "canonical" | "manual"
  * The kind of relationship a link expresses. Mirrors `RawLink.rel` from `./extract`,
  * plus `"sitemap"` for URLs that came from a sitemap rather than from markup.
  */
-export type LinkRel =
-	| "page"
-	| "asset"
-	| "canonical"
-	| "alternate"
-	| "next"
-	| "prev"
-	| "sitemap"
-	| "iframe";
+export type LinkRel = RawLinkRel | "sitemap";
 
 /** One recorded edge of the link graph — whether or not it was followed. */
 export interface LinkRecord {

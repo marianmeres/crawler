@@ -10,6 +10,7 @@
  * @module
  */
 
+import { DEFAULT_EXTRACT_OPTIONS } from "./extract/extract-links.ts";
 import type {
 	CollectOptions,
 	CrawlEvents,
@@ -185,18 +186,21 @@ export function resolveCrawlOptions(options: CrawlOptions = {}): ResolvedCrawlOp
 			maxUrlLength: positive(scope.maxUrlLength, "scope.maxUrlLength") ?? 2048,
 		},
 		normalize: options.normalize ?? {},
+		// the values live in ./extract so that a standalone extractLinks() call and a
+		// crawl can never disagree about what "default" means; validation stays here
 		extract: {
-			anchors: extract.anchors ?? true,
-			canonical: extract.canonical ?? true,
-			nextPrev: extract.nextPrev ?? true,
-			metaRefresh: extract.metaRefresh ?? true,
-			alternate: extract.alternate ?? false,
-			iframes: extract.iframes ?? false,
-			assets: extract.assets ?? false,
-			srcset: extract.srcset ?? false,
+			anchors: extract.anchors ?? DEFAULT_EXTRACT_OPTIONS.anchors,
+			canonical: extract.canonical ?? DEFAULT_EXTRACT_OPTIONS.canonical,
+			nextPrev: extract.nextPrev ?? DEFAULT_EXTRACT_OPTIONS.nextPrev,
+			metaRefresh: extract.metaRefresh ?? DEFAULT_EXTRACT_OPTIONS.metaRefresh,
+			alternate: extract.alternate ?? DEFAULT_EXTRACT_OPTIONS.alternate,
+			iframes: extract.iframes ?? DEFAULT_EXTRACT_OPTIONS.iframes,
+			assets: extract.assets ?? DEFAULT_EXTRACT_OPTIONS.assets,
+			srcset: extract.srcset ?? DEFAULT_EXTRACT_OPTIONS.srcset,
 			maxAnchorText: nonNegative(extract.maxAnchorText, "extract.maxAnchorText") ??
-				200,
-			maxLinks: positive(extract.maxLinks, "extract.maxLinks") ?? 10_000,
+				DEFAULT_EXTRACT_OPTIONS.maxAnchorText,
+			maxLinks: positive(extract.maxLinks, "extract.maxLinks") ??
+				DEFAULT_EXTRACT_OPTIONS.maxLinks,
 		},
 		robots: {
 			respect: robots.respect ?? true,

@@ -21,14 +21,21 @@ Branch: `sprint-01-foundations`
 | 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1 | ✅ | `add24a4` |
 | 5 | deno.json: exports map, imports, publish exclude, test task | [05](./05-testing-docs-release.md) #1 | ✅ | `add24a4` |
 
-Sprint 1 is complete. Next up is backlog rank 6 (`extractLinks`), which is what makes
-`./extract` a real export-map entry.
+Sprint 1 is complete.
+
+## Second batch (`./extract` — backlog ranks 6-8)
+
+Branch: `sprint-01-foundations`, continued. Sprint 1 is not merged yet, so this work
+stacks on that branch rather than starting a new one off `main`.
+
+| # | Task | Source | Status | Commit |
+|---|------|--------|--------|--------|
+| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ✅ | `pending-6` |
 
 ## Backlog (ranked, post-sprint)
 
 | Rank | Task | Source | Status |
 |------|------|--------|--------|
-| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ⬜ |
 | 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ⬜ |
 | 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ⬜ |
 | 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ⬜ |
@@ -230,6 +237,42 @@ Sprint 1 is complete. Next up is backlog rank 6 (`extractLinks`), which is what 
   *both* extraction passes instead of letting the body pass re-derive it. Without that,
   every relative link on a `<base>`-bearing page resolves wrongly and silently. Test
   required in doc 05. (task 12)
+
+- **2026-08-24** — `extractLinks` gained a **`detectBase` option** (`ExtractLinksOptions`,
+  default `true`, not part of the consumer-facing `ExtractOptions`). Doc 02 requires that
+  under `beforeExtract` the body pass "must never be allowed to fall back to its own
+  `<base>` lookup", and nothing in doc 01's signature could express that — passing the
+  precomputed base as `baseUrl` is not enough, because a `<base href>` surviving in the
+  narrowed HTML would still win. Keeping it off `ExtractOptions` keeps it out of
+  `CrawlOptions.extract` and out of the pinned default table. (task 6, serves task 12)
+
+- **2026-08-24** — The `ExtractOptions` defaults live in ONE place,
+  `DEFAULT_EXTRACT_OPTIONS` in `./extract`, and `resolveCrawlOptions` reads them instead
+  of repeating the literals. Values in `./extract`, validation in `src/options.ts` — a
+  standalone `extractLinks()` call never throws on a bad number (it falls back to the
+  default), while `createCrawler({extract: {maxLinks: 0}})` still must. A test asserts the
+  two tables are equal. (task 6)
+
+- **2026-08-24** — `RawLink.tag` and `RawLink.rel` are closed unions (`RawLinkTag`,
+  `RawLinkRel`), not the `tag: string` of doc 01's spec — the same doc calls the tag list
+  closed ("new sources are an options change, not a heuristic"), so the type should say
+  so. `LinkRel` in `src/types.ts` is now literally `RawLinkRel | "sitemap"`, which is what
+  its JSDoc always claimed. (task 6)
+
+- **2026-08-24** — `<link rel=alternate>` is extracted with or without `hreflang` (the
+  `hreflang` is recorded when present), so `alternate: true` also discovers RSS/Atom
+  feeds; `rel="alternate stylesheet"` is classified as an asset, not an alternate. One
+  `<link>` yields at most one edge, precedence canonical > next > prev > stylesheet >
+  alternate. `rel=previous` is accepted as `prev`. (task 6)
+
+- **2026-08-24** — Scanner tolerances worth knowing, all of them browser behavior:
+  `<script>`/`<style>`/`<title>`/`<textarea>` content is raw text (an unclosed one
+  swallows the rest of the document, exactly as in a browser), `<noscript>` content is
+  NOT — those links are real for a non-scripting client, which is what a crawler is. A
+  quote only opens a quoted value where a value can start, so `<a href=a"b>` cannot
+  swallow the document; `<a href=/>` is an href of `"/"`, not a self-closing tag. An
+  empty href is dropped, a fragment-only href (`#top`) is kept — filtering belongs to
+  scope, and normalization already turns it into the page's own URL. (task 6)
 
 ## How to resume (for a fresh conversation)
 

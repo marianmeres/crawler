@@ -1,6 +1,7 @@
 import { assertEquals } from "@std/assert";
 import * as root from "../src/mod.ts";
 import * as url from "../src/url/mod.ts";
+import * as extract from "../src/extract/mod.ts";
 import * as stores from "../src/stores/mod.ts";
 
 /**
@@ -24,6 +25,14 @@ const ROOT_EXPORTS = [
 	"normalizeUrl",
 ];
 
+const EXTRACT_EXPORTS = [
+	"DEFAULT_EXTRACT_OPTIONS",
+	"DEFAULT_TITLE_MAX_LENGTH",
+	"extractBaseHref",
+	"extractLinks",
+	"extractTitle",
+];
+
 const URL_EXPORTS = [
 	"DEFAULT_ALLOW_SCHEMES",
 	"DEFAULT_STRIP_PARAMS",
@@ -44,6 +53,10 @@ Deno.test("mod.ts — exports exactly the documented runtime surface", () => {
 
 Deno.test("url/mod.ts — exports exactly the documented runtime surface", () => {
 	assertEquals(runtimeExportsOf(url), [...URL_EXPORTS].sort());
+});
+
+Deno.test("extract/mod.ts — exports exactly the documented runtime surface", () => {
+	assertEquals(runtimeExportsOf(extract), [...EXTRACT_EXPORTS].sort());
 });
 
 Deno.test("stores/mod.ts — is type-only for now", () => {

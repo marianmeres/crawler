@@ -23,10 +23,14 @@
  *
  * - `@marianmeres/crawler/url` — the pure URL semantics (`normalizeUrl`, `isSameSite`,
  *   `classifyLink`). Dependency-free and useful on its own.
+ * - `@marianmeres/crawler/extract` — the tolerant HTML extraction the engine runs on
+ *   (`extractLinks`, `extractTitle`, `extractBaseHref`). Also dependency-free, and the
+ *   fastest way to pull the links out of one HTML string you already have.
  * - `@marianmeres/crawler/stores` — the frontier/visited persistence seam, for
  *   implementing a custom store.
  *
- * Everything those submodules export that a *consumer* needs is re-exported here.
+ * The types those submodules define are re-exported here; their functions stay on the
+ * subpaths, except `./url`'s, which the crawl-level API leans on directly.
  *
  * @module
  */
