@@ -66,6 +66,48 @@ Deno.test("extract/mod.ts — exports exactly the documented runtime surface", (
 	assertEquals(runtimeExportsOf(extract), [...EXTRACT_EXPORTS].sort());
 });
 
-Deno.test("stores/mod.ts — is type-only for now", () => {
-	assertEquals(runtimeExportsOf(stores), []);
+const STORES_EXPORTS = [
+	"createMemoryFrontier",
+	"createMemoryVisited",
+];
+
+Deno.test("stores/mod.ts — exports exactly the documented runtime surface", () => {
+	assertEquals(runtimeExportsOf(stores), [...STORES_EXPORTS].sort());
+});
+
+/**
+ * The rest of the suite imports by relative path, which is convenient and proves
+ * nothing about packaging. This one resolves through the *published* specifiers — the
+ * `exports` map, reached via the self-referencing `imports` entries in `deno.json` —
+ * so a subpath that is declared but does not resolve fails here rather than at
+ * `deno publish`. It is also what makes the "usable standalone" claim on `./url` and
+ * `./extract` an assertion instead of a sentence in a README.
+ */
+Deno.test("the published subpaths resolve, and to the same modules", async () => {
+	const [pkgRoot, pkgUrl, pkgExtract, pkgStores] = await Promise.all([
+		import("@marianmeres/crawler"),
+		import("@marianmeres/crawler/url"),
+		import("@marianmeres/crawler/extract"),
+		import("@marianmeres/crawler/stores"),
+	]);
+
+	assertEquals(runtimeExportsOf(pkgRoot), [...ROOT_EXPORTS].sort());
+	assertEquals(runtimeExportsOf(pkgUrl), [...URL_EXPORTS].sort());
+	assertEquals(runtimeExportsOf(pkgExtract), [...EXTRACT_EXPORTS].sort());
+	assertEquals(runtimeExportsOf(pkgStores), [...STORES_EXPORTS].sort());
+
+	// the same module instance, not a second copy of the graph
+	assertEquals(pkgUrl.normalizeUrl, url.normalizeUrl);
+	assertEquals(pkgExtract.extractLinks, extract.extractLinks);
+	assertEquals(pkgStores.createMemoryFrontier, stores.createMemoryFrontier);
+
+	// and they actually work when reached that way
+	assertEquals(
+		pkgUrl.normalizeUrl("https://Ex.com/a/?b=2&a=1"),
+		"https://ex.com/a?a=1&b=2",
+	);
+	assertEquals(
+		pkgExtract.extractLinks(`<a href="/x">t</a>`, "https://a.com/")[0].url,
+		"https://a.com/x",
+	);
 });

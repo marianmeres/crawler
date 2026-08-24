@@ -42,7 +42,7 @@ Branch: `sprint-01-foundations`, continued.
 |---|------|--------|--------|--------|
 | 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ✅ | `TBD9` |
 | 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ✅ | `TBD10` |
-| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ⬜ | |
+| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ✅ | `TBD11` |
 
 ## Backlog (ranked, post-sprint)
 
@@ -432,6 +432,31 @@ Branch: `sprint-01-foundations`, continued.
   transport is HTTP whatever `normalize.allowSchemes` was widened to keep in the graph,
   so this is a transport fact rather than a duplicated policy — and it makes the function
   correct standalone, which is what makes it exhaustively testable. (task 10)
+
+- **2026-08-24** — Memory frontier shape: a **min-heap per host** plus a never-shrinking
+  pushed-URL set, an in-flight map and a maintained pending counter. `pop` has to claim
+  the globally best item whose host is not currently excluded; one ordered queue would
+  have to pop-and-stash past excluded hosts, while per-host heaps make exclusion a set
+  lookup and the claim an O(#hosts) scan of heads. Two implementation choices worth
+  writing down: items are **copied on push** (a caller mutating what it pushed must not
+  reorder a heap it no longer owns — the `resolveCrawlOptions` array-copy precedent), and
+  a **deferred head blocks its host** rather than being skipped over, which agrees with
+  what `release(url, readyAt)` means (the engine is putting a host aside). (task 11)
+
+- **2026-08-24** — The memory `VisitedStore` forces `hasBody: false` on the way out
+  whatever the caller passed, and `add` **replaces** rather than merges. `hasBody` is the
+  engine's permission to send `If-None-Match`, and a `304` is only useful when there is a
+  stored body to re-extract links from — a memory store answering `true` would turn every
+  unchanged page into a page with no links. Replacing rather than merging keeps a
+  redirect intermediate's minimal `{crawledAt, status}` from resurrecting a field of an
+  earlier, fuller record. (task 11)
+
+- **2026-08-24** — `tests/mod.test.ts` now also imports through the **published**
+  specifiers (`@marianmeres/crawler`, `/url`, `/extract`, `/stores`) and asserts they
+  resolve to the same modules with the same surfaces. Doc 05 §6 asks for the standalone
+  contract to be *proven*; the rest of the suite imports by relative path, which proves
+  nothing about packaging. A subpath that is declared but does not resolve now fails a
+  test instead of `deno publish`. (task 11, review carry-over from task 9)
 
 ## How to resume (for a fresh conversation)
 
