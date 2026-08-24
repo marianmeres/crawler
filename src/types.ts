@@ -130,16 +130,30 @@ export interface RobotsOptions {
 	/**
 	 * Seed the frontier from the `Sitemap:` lines of each origin's robots.txt.
 	 * Default `false`.
+	 *
+	 * **Not implemented yet** — it needs a sitemap parser. `Sitemap:` lines are already
+	 * parsed and cached; setting this warns once and seeds nothing.
 	 */
 	sitemaps?: boolean;
 	/** Cap on an honored `Crawl-delay`, in ms. Default `30_000`. */
 	crawlDelayCap?: number;
-	/** Byte cap on a robots.txt fetch. Default `512_000`. */
+	/**
+	 * Byte cap on a robots.txt. Default `512_000`. Enforced on the parse as well as on
+	 * the transfer, so it still means something when robots.txt comes through an
+	 * injected fetcher the engine did not configure.
+	 */
 	maxBytes?: number;
 	/**
-	 * Transport override for robots.txt only — for auth/proxy setups. By default the
-	 * engine uses its own small HTTP fetcher (always HTTP, even when the main fetcher
-	 * is browser-backed) restricted to `text/plain`.
+	 * Transport for robots.txt only.
+	 *
+	 * The default is **the crawl's own {@linkcode CrawlOptions.fetcher}** when you
+	 * injected one, so a proxy, an auth header or a test double covers robots.txt like
+	 * every other request. Only when the engine owns the transport does it build a
+	 * dedicated one for robots: a small HTTP fetcher restricted to `text/plain` and to
+	 * {@linkcode RobotsOptions.maxBytes}.
+	 *
+	 * Set this when your injected fetcher is the wrong tool for a text file — the
+	 * browser-adapter case, where robots.txt would otherwise be *rendered*.
 	 */
 	fetch?: FetchFn;
 }
@@ -360,6 +374,11 @@ export interface LinkRecord {
 	/** Locality of the edge, per the `subdomains` scope mode. */
 	kind: "internal" | "external";
 	rel: LinkRel;
+	/**
+	 * The link carried `rel="nofollow"`, **or** its source page did — via
+	 * `<meta name=robots>` or `X-Robots-Tag`. Both report the same
+	 * `skipReason: "nofollow"`.
+	 */
 	nofollow: boolean;
 	/**
 	 * Innermost sectioning landmark the link was found in, when the markup has one.

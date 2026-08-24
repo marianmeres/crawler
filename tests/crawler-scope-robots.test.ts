@@ -71,7 +71,11 @@ Deno.test("scope — a seed bypasses pathPrefix; the links it finds do not", asy
 
 	// the seed is the instruction, not a discovery — narrowing it would make this
 	// crawl fetch nothing at all
-	assertEquals(fake.calls.map((c) => c.url), [`${SITE}/`, `${SITE}/a`]);
+	assertEquals(fake.calls.map((c) => c.url), [
+		`${SITE}/robots.txt`,
+		`${SITE}/`,
+		`${SITE}/a`,
+	]);
 	assertEquals(
 		report.graph.filter((e) => e.skipReason === "out-of-scope").map((e) => e.to)
 			.sort(),
@@ -149,6 +153,7 @@ Deno.test("followRegions — content links are followed, chrome links are record
 	});
 
 	assertEquals(fake.calls.map((c) => c.url), [
+		`${REGION}/robots.txt`,
 		`${REGION}/`,
 		`${REGION}/main`,
 		`${REGION}/article`,
@@ -177,7 +182,11 @@ Deno.test("followRegions — ['main'] alone skips the <article> body (the docume
 		scope: { followRegions: ["main"] },
 	});
 
-	assertEquals(fake.calls.map((c) => c.url), [`${REGION}/`, `${REGION}/main`]);
+	assertEquals(fake.calls.map((c) => c.url), [
+		`${REGION}/robots.txt`,
+		`${REGION}/`,
+		`${REGION}/main`,
+	]);
 });
 
 Deno.test("followRegions — a landmark-free page still crawls, warning once per crawl", async () => {
@@ -196,7 +205,7 @@ Deno.test("followRegions — a landmark-free page still crawls, warning once per
 	});
 
 	// the whole-document fallback: without it one non-semantic page dead-ends the crawl
-	assertEquals(fake.calls.length, 3);
+	assertEquals(fake.calls.filter((c) => !c.url.endsWith("/robots.txt")).length, 3);
 	const warnings = logger.messages("warn").filter((m) => m.includes("followRegions"));
 	assertEquals(warnings.length, 1, warnings.join("\n"));
 });
@@ -336,3 +345,228 @@ async function sha256Hex(bytes: Uint8Array): Promise<string> {
 	return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, "0"))
 		.join("");
 }
+
+// -----------------------------------------------------------------------------------
+// robots.txt — the gate
+// -----------------------------------------------------------------------------------
+
+Deno.test("robots — a disallowed path is skipped, and recorded as robots-disallow", async () => {
+	const fake = siteFetch(SMALL_SITE);
+	const report = await crawl(`${SITE}/`, { fetcher: fake });
+
+	assertFalse(fake.calls.some((c) => c.url === `${SITE}/private/secret`));
+	const edge = report.graph.find((e) => e.to === `${SITE}/private/secret`)!;
+	assertEquals(edge.followed, false);
+	assertEquals(edge.skipReason, "robots-disallow");
+	assertEquals(report.stats.skippedByReason["robots-disallow"], 1);
+
+	// and everything robots.txt did NOT disallow was crawled as usual
+	assert(fake.calls.some((c) => c.url === `${SITE}/a`));
+});
+
+Deno.test("robots — one fetch per origin, however many links reach it", async () => {
+	const fake = siteFetch(SMALL_SITE);
+	await crawl(`${SITE}/`, { fetcher: fake, concurrency: 5 });
+
+	assertEquals(fake.calls.filter((c) => c.url === `${SITE}/robots.txt`).length, 1);
+	// it is also the very first thing asked for — the seed goes through the gate too
+	assertEquals(fake.calls[0].url, `${SITE}/robots.txt`);
+});
+
+Deno.test("robots — a disallowed seed is refused, loudly", async () => {
+	const logger = recordingLogger();
+	const fake = siteFetch(SMALL_SITE);
+	const report = await crawl(`${SITE}/private/secret`, { fetcher: fake, logger });
+
+	assertEquals(report.pages, []);
+	assertEquals(report.stats.skippedByReason["robots-disallow"], 1);
+	assertEquals(
+		logger.messages("warn").filter((m) => m.includes("robots-disallow")).length,
+		1,
+	);
+});
+
+Deno.test("robots — respect:false ignores the rules and warns exactly once", async () => {
+	const logger = recordingLogger();
+	const fake = siteFetch(SMALL_SITE);
+	await crawl(`${SITE}/`, { fetcher: fake, logger, robots: { respect: false } });
+
+	assert(fake.calls.some((c) => c.url === `${SITE}/private/secret`));
+	// not even fetched — an ignored robots.txt is not worth a request
+	assertFalse(fake.calls.some((c) => c.url === `${SITE}/robots.txt`));
+	const warnings = logger.messages("warn").filter((m) => m.includes("robots.respect"));
+	assertEquals(warnings.length, 1, warnings.join("\n"));
+});
+
+Deno.test("robots — 5xx disallows the whole origin; 4xx and errors allow it", async () => {
+	const page = { html: `<title>x</title><a href="/other">other</a>` };
+
+	const logger = recordingLogger();
+	const down = siteFetch({
+		"http://down.test/robots.txt": { status: 503, contentType: "text/plain" },
+		"http://down.test/": page,
+		"http://down.test/other": page,
+	});
+	const blocked = await crawl("http://down.test/", { fetcher: down, logger });
+	assertEquals(blocked.pages, []);
+	assertEquals(blocked.stats.skippedByReason["robots-disallow"], 1);
+	assertEquals(
+		logger.messages("warn").filter((m) => m.includes("503")).length,
+		1,
+		"a 5xx robots.txt warns once for its origin",
+	);
+
+	// 404: SMALL_SITE's fake answers unknown URLs with one, so any other host is the
+	// "no robots.txt at all" case
+	const open = siteFetch({ "http://open.test/": page, "http://open.test/other": page });
+	const allowed = await crawl("http://open.test/", { fetcher: open });
+	assertEquals(allowed.pages.length, 2);
+
+	// a transport error is indistinguishable from "no rules", so it fails open too
+	const broken = siteFetch({
+		"http://broken.test/robots.txt": { error: { kind: "network" } },
+		"http://broken.test/": page,
+		"http://broken.test/other": page,
+	});
+	const survived = await crawl("http://broken.test/", { fetcher: broken });
+	assertEquals(survived.pages.length, 2);
+});
+
+Deno.test("robots — a robots.txt served as HTML is read as no rules", async () => {
+	// the SPA catch-all route: a 200 that is really the app shell
+	const fake = siteFetch({
+		"http://spa.test/robots.txt": {
+			contentType: "text/html",
+			html: `<!doctype html><title>App</title><p>Disallow: /</p>`,
+		},
+		"http://spa.test/": { html: `<title>x</title><a href="/other">other</a>` },
+		"http://spa.test/other": { html: `<title>other</title>` },
+	});
+	const report = await crawl("http://spa.test/", { fetcher: fake });
+
+	assertEquals(report.pages.length, 2);
+	assertEquals(report.stats.skippedByReason["robots-disallow"], undefined);
+});
+
+Deno.test("robots — Crawl-delay feeds the scheduler, capped", async () => {
+	const starts: number[] = [];
+	const inner = siteFetch({
+		"http://slow.test/robots.txt": {
+			contentType: "text/plain",
+			html: `User-agent: *\nCrawl-delay: 10\n`,
+		},
+		"http://slow.test/": {
+			html: `<title>x</title><a href="/a">a</a><a href="/b">b</a>`,
+		},
+		"http://slow.test/a": { html: `<title>a</title>` },
+		"http://slow.test/b": { html: `<title>b</title>` },
+	});
+	const report = await crawl("http://slow.test/", {
+		fetcher: (req) => {
+			if (!req.url.endsWith("/robots.txt")) starts.push(Date.now());
+			return inner(req);
+		},
+		// 10 seconds asked for, 40ms honored — the cap is what makes this testable, and
+		// is also the only thing between a crawl and a robots.txt asking for an hour
+		robots: { crawlDelayCap: 40, fetch: inner },
+		perHostConcurrency: 1,
+	});
+
+	assertEquals(report.pages.length, 3);
+	assertEquals(starts.length, 3);
+	for (let i = 1; i < starts.length; i++) {
+		assert(
+			starts[i] - starts[i - 1] >= 35,
+			`gap ${i} was ${starts[i] - starts[i - 1]}ms`,
+		);
+	}
+});
+
+// -----------------------------------------------------------------------------------
+// robots.txt — the per-page directives
+// -----------------------------------------------------------------------------------
+
+const DIRECTIVE = "http://directive.test";
+
+Deno.test("meta robots — nofollow stops expansion, noindex is only recorded", async () => {
+	const fake = siteFetch({
+		[`${DIRECTIVE}/`]: {
+			html: `<head><meta name="robots" content="noindex, nofollow"></head>
+				<a href="/a">a</a><a href="/b">b</a>`,
+		},
+		[`${DIRECTIVE}/a`]: { html: `<title>a</title>` },
+		[`${DIRECTIVE}/b`]: { html: `<title>b</title>` },
+	});
+	const report = await crawl(`${DIRECTIVE}/`, { fetcher: fake });
+
+	const page = report.pages[0];
+	assertEquals(page.robots, { noindex: true, nofollow: true });
+	// noindex is not the crawler's business — the page was still fetched and reported
+	assertEquals(page.ok, true);
+
+	assertEquals(page.links.map((l) => [l.to, l.nofollow, l.skipReason]), [
+		[`${DIRECTIVE}/a`, true, "nofollow"],
+		[`${DIRECTIVE}/b`, true, "nofollow"],
+	]);
+	assertEquals(report.stats.skippedByReason.nofollow, 2);
+	assertFalse(fake.calls.some((c) => c.url === `${DIRECTIVE}/a`));
+});
+
+Deno.test("X-Robots-Tag — the header does what the meta tag does", async () => {
+	const fake = siteFetch({
+		[`${DIRECTIVE}/`]: {
+			headers: { "x-robots-tag": "noindex, nofollow" },
+			html: `<a href="/a">a</a>`,
+		},
+		[`${DIRECTIVE}/a`]: { html: `<title>a</title>` },
+	});
+	const report = await crawl(`${DIRECTIVE}/`, { fetcher: fake });
+
+	assertEquals(report.pages[0].robots, { noindex: true, nofollow: true });
+	assertEquals(report.pages[0].links[0].skipReason, "nofollow");
+});
+
+Deno.test("X-Robots-Tag — applies to a non-HTML response too", async () => {
+	const fake = siteFetch({
+		[`${DIRECTIVE}/data.json`]: {
+			contentType: "application/json",
+			headers: { "x-robots-tag": "noindex" },
+			html: `{"a":1}`,
+		},
+	});
+	const report = await crawl(`${DIRECTIVE}/data.json`, { fetcher: fake });
+
+	// nothing was parsed for links, but the directive is still on the record
+	assertEquals(report.pages[0].links, []);
+	assertEquals(report.pages[0].robots, { noindex: true, nofollow: false });
+});
+
+Deno.test("robots directives — merged most-restrictive-wins, and absent when silent", async () => {
+	const fake = siteFetch({
+		[`${DIRECTIVE}/`]: {
+			headers: { "x-robots-tag": "noindex" },
+			html:
+				`<head><meta name="robots" content="nofollow"></head><a href="/a">a</a>`,
+		},
+		[`${DIRECTIVE}/quiet`]: { html: `<title>quiet</title>` },
+	});
+
+	const merged = await crawl(`${DIRECTIVE}/`, { fetcher: fake });
+	assertEquals(merged.pages[0].robots, { noindex: true, nofollow: true });
+
+	const quiet = await crawl(`${DIRECTIVE}/quiet`, { fetcher: siteFetch(SMALL_SITE) });
+	assertEquals(quiet.pages[0].robots, undefined);
+});
+
+Deno.test("followNofollow — overrides both the rel and the page directive", async () => {
+	const fake = siteFetch({
+		[`${DIRECTIVE}/`]: {
+			html:
+				`<head><meta name="robots" content="nofollow"></head><a href="/a">a</a>`,
+		},
+		[`${DIRECTIVE}/a`]: { html: `<title>a</title>` },
+	});
+	await crawl(`${DIRECTIVE}/`, { fetcher: fake, scope: { followNofollow: true } });
+
+	assert(fake.calls.some((c) => c.url === `${DIRECTIVE}/a`));
+});

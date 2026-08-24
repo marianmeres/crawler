@@ -33,8 +33,9 @@ import type {
 } from "@marianmeres/page-fetcher";
 
 import { extractBaseHref, extractLinks, extractTitle } from "../extract/extract-links.ts";
-import { parseMetaRobots } from "../extract/meta-robots.ts";
+import { parseMetaRobots, parseXRobotsTag } from "../extract/meta-robots.ts";
 import type { ExtractLinksOptions } from "../extract/extract-links.ts";
+import type { RobotsDirectives } from "../extract/meta-robots.ts";
 import type { RawLink } from "../extract/types.ts";
 import { resolveCrawlOptions } from "../options.ts";
 import type { ResolvedCrawlOptions } from "../options.ts";
@@ -55,6 +56,8 @@ import type {
 import { classifyLink } from "../url/same-site.ts";
 import { normalizeUrl } from "../url/normalize-url.ts";
 import { Channel } from "./channel.ts";
+import { createRobotsGate } from "./robots-gate.ts";
+import type { RobotsGate } from "./robots-gate.ts";
 import { evaluateScope, isOnSeedSite } from "./scope.ts";
 import type { ScopeContext } from "./scope.ts";
 import { createStatsCounter } from "./stats.ts";
@@ -118,6 +121,8 @@ export class CrawlEngine {
 
 	#channel: Channel<PageResult> | undefined;
 	#stats: StatsCounter;
+	/** Built at `run()`, once the transport it may borrow is known. */
+	#robots: RobotsGate | undefined;
 
 	// --- dispatcher state ---
 	readonly #hosts = new Map<string, HostState>();
@@ -308,6 +313,7 @@ export class CrawlEngine {
 	async #start(seeds?: string | string[]): Promise<void> {
 		this.#stats = createStatsCounter(this.crawlId, { maxPages: this.#opts.maxPages });
 		this.#resolveFetch();
+		this.#resolveRobots();
 
 		const list = seeds === undefined ? [] : Array.isArray(seeds) ? seeds : [seeds];
 
@@ -529,9 +535,9 @@ export class CrawlEngine {
 		return state;
 	}
 
-	/** robots.txt `Crawl-delay`, in ms. Wired by the robots gate; `0` until then. */
-	#crawlDelayMs(_host: string): number {
-		return 0;
+	/** robots.txt `Crawl-delay` for a host, in ms, capped. `0` when there is none. */
+	#crawlDelayMs(host: string): number {
+		return this.#robots?.crawlDelayMs(host) ?? 0;
 	}
 
 	/** Park until a completion signal, optionally with a timeout. */
@@ -629,6 +635,11 @@ export class CrawlEngine {
 		let html: string | undefined;
 
 		if (error === undefined && fetchResult !== undefined) {
+			// `X-Robots-Tag` applies to every response, not only to documents — a PDF
+			// can carry a `noindex` that no `<meta>` ever could
+			const header = parseXRobotsTag(fetchResult.headers.get("x-robots-tag"), {
+				botName: this.#opts.userAgent,
+			});
 			try {
 				if (fetchResult.hasBody) {
 					bytes = await fetchResult.bytes();
@@ -641,7 +652,9 @@ export class CrawlEngine {
 					}
 				}
 				if (html !== undefined) {
-					await this.#readDocument(result, item, html, fetchResult);
+					await this.#readDocument(result, item, html, fetchResult, header);
+				} else {
+					applyRobots(result, header);
 				}
 			} catch (e) {
 				// extraction and the hooks it runs produce data; a throw fails the page
@@ -772,12 +785,16 @@ export class CrawlEngine {
 		item: FrontierItem,
 		html: string,
 		fetchResult: FetchResult,
+		header: RobotsDirectives,
 	): Promise<void> {
 		result.title = extractTitle(html);
+		// `<meta name=robots>` merged with `X-Robots-Tag`, most-restrictive-wins
 		const meta = parseMetaRobots(html);
-		if (meta.noindex || meta.nofollow) {
-			result.robots = { noindex: meta.noindex, nofollow: meta.nofollow };
-		}
+		applyRobots(result, {
+			noindex: header.noindex || meta.noindex,
+			nofollow: header.nofollow || meta.nofollow,
+			raw: [...header.raw, ...meta.raw],
+		});
 
 		let raw: RawLink[];
 		if (this.#opts.beforeExtract === undefined) {
@@ -826,6 +843,9 @@ export class CrawlEngine {
 		const base = result.finalUrl;
 		const scope = this.#opts.scope;
 		const regionsPresent = raw.some((link) => link.region !== undefined);
+		// a page that says `nofollow` says it about every link on it — recorded on each
+		// edge, and reported under the same `"nofollow"` reason a `rel` would be
+		const pageNofollow = result.robots?.nofollow === true;
 
 		if (scope.followRegions.length > 0 && !regionsPresent && raw.length > 0) {
 			if (!this.#warnedRegionFallback) {
@@ -844,6 +864,7 @@ export class CrawlEngine {
 				base,
 				depth: item.depth,
 				regionsPresent,
+				pageNofollow,
 			});
 			result.links.push(record);
 			if (this.#opts.collect.graph) this.#graph.push(record);
@@ -864,7 +885,13 @@ export class CrawlEngine {
 	/** One edge: build its {@linkcode LinkRecord} and, if it survives, queue it. */
 	async #processLink(
 		link: RawLink,
-		page: { from: string; base: string; depth: number; regionsPresent: boolean },
+		page: {
+			from: string;
+			base: string;
+			depth: number;
+			regionsPresent: boolean;
+			pageNofollow: boolean;
+		},
 	): Promise<LinkRecord> {
 		const resolved = link.url;
 		const to = resolved === undefined
@@ -882,7 +909,7 @@ export class CrawlEngine {
 				subdomains: this.#opts.scope.subdomains,
 			}),
 			rel: link.rel,
-			nofollow: link.nofollow,
+			nofollow: link.nofollow || page.pageNofollow,
 			followed: false,
 		};
 		if (link.region !== undefined) record.region = link.region;
@@ -911,6 +938,11 @@ export class CrawlEngine {
 		// (the same one an `include` miss reports).
 		if (record.rel === "canonical" && !this.#opts.followCanonical) {
 			record.skipReason = "excluded";
+			return record;
+		}
+
+		if (!await this.#robots!.isAllowed(to)) {
+			record.skipReason = "robots-disallow";
 			return record;
 		}
 
@@ -979,6 +1011,7 @@ export class CrawlEngine {
 		});
 		if (!verdict.follow) return verdict.reason;
 
+		if (!await this.#robots!.isAllowed(entry.url)) return "robots-disallow";
 		if (!this.#opts.recrawl && await this.#visited.has(entry.url)) return "duplicate";
 
 		const outcome = await this.#enqueue({
@@ -1010,6 +1043,12 @@ export class CrawlEngine {
 		if (!verdict.follow) {
 			this.#stats.recordSkip(verdict.reason);
 			this.#opts.logger?.warn(`[crawl] seed rejected (${verdict.reason}): ${url}`);
+			return;
+		}
+
+		if (!await this.#robots!.isAllowed(url)) {
+			this.#stats.recordSkip("robots-disallow");
+			this.#opts.logger?.warn(`[crawl] seed rejected (robots-disallow): ${url}`);
 			return;
 		}
 
@@ -1160,11 +1199,64 @@ export class CrawlEngine {
 		this.#fetch = (req: FetchRequest) => this.#ownedFetcher!.fetch(req);
 	}
 
+	/**
+	 * Build the robots gate.
+	 *
+	 * The transport default is the deviation worth knowing about: robots.txt is fetched
+	 * with **the crawl's own transport** whenever the consumer injected one. Doc 02
+	 * specifies a dedicated HTTP fetcher unconditionally, on the grounds that a
+	 * browser-backed fetcher should not render robots.txt — but applied to an injected
+	 * fetcher that rule routes robots.txt *around* a consumer's proxy or auth, where it
+	 * 401s or times out and fails open to allow-all, silently. `robots.fetch` is the
+	 * explicit override for the browser case; nothing overrides a silent failure.
+	 */
+	#resolveRobots(): void {
+		const robots = this.#opts.robots;
+		this.#robots = createRobotsGate({
+			respect: robots.respect,
+			userAgent: this.#opts.userAgent,
+			crawlDelayCap: robots.crawlDelayCap,
+			maxBytes: robots.maxBytes,
+			fetch: robots.fetch ??
+				(this.#opts.fetcher === undefined ? undefined : this.#fetch),
+			...(this.#opts.logger === undefined ? {} : { logger: this.#opts.logger }),
+			signal: this.#abortController.signal,
+		});
+
+		if (!robots.respect) {
+			this.#opts.logger?.warn(
+				`[crawl] robots.respect is false — this crawl ignores robots.txt`,
+			);
+		}
+		if (robots.sitemaps) {
+			this.#opts.logger?.warn(
+				`[crawl] robots.sitemaps is not implemented yet — Sitemap: lines are ` +
+					`parsed and readable, but nothing is seeded from them`,
+			);
+		}
+	}
+
 	async #disposeFetcher(): Promise<void> {
+		const gate = this.#robots;
+		this.#robots = undefined;
+		await gate?.dispose();
+
 		const owned = this.#ownedFetcher;
 		this.#ownedFetcher = undefined;
 		await owned?.dispose();
 	}
+}
+
+/**
+ * Record what a page said about itself — but only when it said something.
+ *
+ * `noindex` is recorded and never acted on: a crawler is not an indexer, and the
+ * consumer that builds a sitemap is the one that cares. `nofollow` is what stops
+ * expansion, in the scope pipeline.
+ */
+function applyRobots(result: PageResult, directives: RobotsDirectives): void {
+	if (!directives.noindex && !directives.nofollow) return;
+	result.robots = { noindex: directives.noindex, nofollow: directives.nofollow };
 }
 
 /** `new URL(url).hostname`, or `""` for anything that is not a URL. */

@@ -43,6 +43,9 @@ function instrument(inner: FetchFn): Instrumented {
 
 	const fetch: FetchFn = async (req) => {
 		const host = new URL(req.url).hostname;
+		// robots.txt does not go through the frontier, so it is not crawl traffic and
+		// is not under the politeness caps — counting it would measure the wrong thing
+		if (req.url.endsWith("/robots.txt")) return await inner(req);
 
 		inFlight++;
 		maxInFlight = Math.max(maxInFlight, inFlight);

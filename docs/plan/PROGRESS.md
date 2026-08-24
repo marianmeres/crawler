@@ -51,8 +51,8 @@ Branch: `sprint-01-foundations`, continued.
 | #  | Task                                                                        | Source                                | Status | Commit    |
 | -- | --------------------------------------------------------------------------- | ------------------------------------- | ------ | --------- |
 | 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5         | ✅     | `abf175b` |
-| 13 | Fake-`FetchFn` helper + mini-site + engine tests                            | [05](./05-testing-docs-release.md) #3 | ✅     | `TBD13`   |
-| 14 | robots.txt enforcement gate + directives                                    | [02](./02-crawl-engine.md) #4         | ⬜     |           |
+| 13 | Fake-`FetchFn` helper + mini-site + engine tests                            | [05](./05-testing-docs-release.md) #3 | ✅     | `2093bfb` |
+| 14 | robots.txt enforcement gate + directives                                    | [02](./02-crawl-engine.md) #4         | ✅     | `4160614` |
 
 ## Backlog (ranked, post-sprint)
 
@@ -638,6 +638,61 @@ Branch: `sprint-01-foundations`, continued.
   latched while it ran. Found by the task-13 suite (it deadlocked the run rather than
   failing an assertion, which is how the whole file came to be run one test at a time).
   (task 13)
+
+- **2026-08-24** — **robots.txt is fetched with the crawl's own transport whenever the
+  consumer injected one.** Doc 02 item 4 specifies a dedicated `text/plain` HTTP fetcher
+  _unconditionally_, so that a browser-backed fetcher never renders robots.txt. Applied
+  to an injected fetcher, though, that rule routes robots.txt _around_ the consumer's
+  proxy, auth header or test double — where it 401s, times out or hits the real network,
+  and the failure semantics then fail it OPEN to allow-all, silently. Weigh the two: the
+  browser case is visible and has an explicit override (`robots.fetch`), while the proxy
+  case is a politeness failure nobody can see. So the dedicated fetcher is now what the
+  engine builds when _it_ owns the transport, and `robots.fetch` is documented as the
+  browser-adapter escape hatch. It is also what lets the engine suite prove zero sockets:
+  `deno test --allow-read --allow-env` passes on all 59 engine tests. (task 14)
+
+- **2026-08-24** — Two policies doc 02 delegated to adapter configuration were moved
+  into the gate itself, because with an injected transport there is no adapter to
+  configure: `robots.maxBytes` is enforced on the parse (the text is sliced before
+  `parseRobotsTxt`), and a robots.txt served as **HTML** — the SPA catch-all route — is
+  read as "no rules" rather than parsed into accidental directives. Doc 02 got the second
+  one for free from `allowContentTypes: ["text/plain"]` + `onUnsupportedType: "skip-body"`;
+  stating it explicitly makes it true for every transport. (task 14)
+
+- **2026-08-24** — `crawlDelayMs(host)` is **synchronous and host-keyed**, and the
+  LARGEST delay wins when one host serves different rules on http and https — the same
+  call task 7 made across groups, for the same reason (being slower than asked is never
+  a violation). Synchronous because the dispatcher reads it while scheduling; it can only
+  know about origins whose rules have already resolved, which is exactly the origins the
+  crawl has reached, because the gate runs at enqueue time and enqueue precedes dispatch.
+  (task 14)
+
+- **2026-08-24** — The gate runs at **every** enqueue point: links, seeds and `add()`.
+  A disallowed seed is skipped and warned rather than silently producing an empty crawl.
+  Check-only externals are gated too (doc 02 says "every enqueue" with no exception), so
+  a broken-link check of N external hosts costs N robots.txt fetches — polite, and one
+  request per origin per run. `respect: false` fetches nothing at all: an ignored
+  robots.txt is not worth a request. (task 14)
+
+- **2026-08-24** — `X-Robots-Tag` is read from **every** response, not only from HTML —
+  a PDF can carry a `noindex` that no `<meta>` ever could — and merged with
+  `<meta name=robots>` most-restrictive-wins. A page-level `nofollow` is OR'd into
+  `LinkRecord.nofollow` for every link on the page, so it reports the same
+  `skipReason: "nofollow"` a `rel` would; `noindex` is recorded and never acted on. The
+  `LinkRecord.nofollow` JSDoc now says so, since "the markup said nofollow" is no longer
+  the only way that field becomes true. (task 14)
+
+- **2026-08-24** — `robots.sitemaps: true` **warns once and seeds nothing**: it needs
+  `parseSitemap`, which is backlog rank 18. `Sitemap:` lines are already parsed and the
+  gate exposes `sitemapUrls(origin)`, so rank 18 is the seeding, not the plumbing. A
+  silently-ignored option would be the worse failure. (task 14)
+
+- **2026-08-24** — `deno.json` gained
+  `"@marianmeres/page-fetcher/adapters"` — an import-map entry does not cover a
+  package's subpaths in Deno, and the gate needs `createHttpAdapter` for the fetcher it
+  builds when the engine owns the transport. First dependency subpath in the map; the
+  task-5 rule still holds (it entered when the first line of code imported it).
+  (task 14)
 
 ## How to resume (for a fresh conversation)
 
