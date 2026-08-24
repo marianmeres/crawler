@@ -13,13 +13,13 @@ A fresh conversation should read this file first, then the relevant `NN-*.md` se
 
 Branch: `sprint-01-foundations`
 
-| # | Task | Source | Status | Commit |
-|---|------|--------|--------|--------|
-| 1 | `normalizeUrl` pipeline + `NormalizeOptions` | [01](./01-url-and-extraction.md) #3 | ✅ | `ff0abf6` |
-| 2 | `isSameSite` + registrable-domain heuristic + `classifyLink` | [01](./01-url-and-extraction.md) #1 | ✅ | `04ed377` |
-| 3 | `./url` unit-test corpora (incl. idempotency property test) | [01](./01-url-and-extraction.md) #5 | ✅ | `7a37b9e` |
-| 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1 | ✅ | `add24a4` |
-| 5 | deno.json: exports map, imports, publish exclude, test task | [05](./05-testing-docs-release.md) #1 | ✅ | `add24a4` |
+| # | Task                                                           | Source                                | Status | Commit    |
+| - | -------------------------------------------------------------- | ------------------------------------- | ------ | --------- |
+| 1 | `normalizeUrl` pipeline + `NormalizeOptions`                   | [01](./01-url-and-extraction.md) #3   | ✅     | `ff0abf6` |
+| 2 | `isSameSite` + registrable-domain heuristic + `classifyLink`   | [01](./01-url-and-extraction.md) #1   | ✅     | `04ed377` |
+| 3 | `./url` unit-test corpora (incl. idempotency property test)    | [01](./01-url-and-extraction.md) #5   | ✅     | `7a37b9e` |
+| 4 | Public API surface: all types + `crawl`/`createCrawler` shells | [02](./02-crawl-engine.md) #1         | ✅     | `add24a4` |
+| 5 | deno.json: exports map, imports, publish exclude, test task    | [05](./05-testing-docs-release.md) #1 | ✅     | `add24a4` |
 
 Sprint 1 is complete.
 
@@ -28,53 +28,60 @@ Sprint 1 is complete.
 Branch: `sprint-01-foundations`, continued. Sprint 1 is not merged yet, so this work
 stacks on that branch rather than starting a new one off `main`.
 
-| # | Task | Source | Status | Commit |
-|---|------|--------|--------|--------|
-| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ✅ | `4c5cd07` |
-| 7 | `parseRobotsTxt` + wildcard matcher | [01](./01-url-and-extraction.md) #4 | ✅ | `4f7a2a5` |
-| 8 | `parseMetaRobots` + `parseXRobotsTag` | [01](./01-url-and-extraction.md) #2 | ✅ | `0914574` |
+| # | Task                                                                            | Source                              | Status | Commit    |
+| - | ------------------------------------------------------------------------------- | ----------------------------------- | ------ | --------- |
+| 6 | `extractLinks` tokenizer + `extractTitle` + `_html.ts` scanner (incl. `region`) | [01](./01-url-and-extraction.md) #6 | ✅     | `4c5cd07` |
+| 7 | `parseRobotsTxt` + wildcard matcher                                             | [01](./01-url-and-extraction.md) #4 | ✅     | `4f7a2a5` |
+| 8 | `parseMetaRobots` + `parseXRobotsTag`                                           | [01](./01-url-and-extraction.md) #2 | ✅     | `0914574` |
 
 ## Third batch (corpora + scope + stores — backlog ranks 9-11)
 
 Branch: `sprint-01-foundations`, continued.
 
-| # | Task | Source | Status | Commit |
-|---|------|--------|--------|--------|
-| 9 | `./extract` fixture corpora + never-throws fuzz | [01](./01-url-and-extraction.md) #5 | ✅ | `33c3d53` |
-| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2 | ✅ | `7a3dd00` |
-| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls | [02](./02-crawl-engine.md) #3 | ✅ | `0778cbb` |
+| #  | Task                                                                         | Source                              | Status | Commit    |
+| -- | ---------------------------------------------------------------------------- | ----------------------------------- | ------ | --------- |
+| 9  | `./extract` fixture corpora + never-throws fuzz                              | [01](./01-url-and-extraction.md) #5 | ✅     | `33c3d53` |
+| 10 | Scope evaluation + `SkipReason` + private-host guard (incl. `followRegions`) | [02](./02-crawl-engine.md) #2       | ✅     | `7a3dd00` |
+| 11 | `FrontierStore`/`VisitedStore` interfaces + memory impls                     | [02](./02-crawl-engine.md) #3       | ✅     | `0778cbb` |
+
+## Fourth batch (the engine — backlog ranks 12-14)
+
+Branch: `sprint-01-foundations`, continued.
+
+| #  | Task                                                                        | Source                                | Status | Commit  |
+| -- | --------------------------------------------------------------------------- | ------------------------------------- | ------ | ------- |
+| 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5         | ✅     | `TBD12` |
+| 13 | Fake-`FetchFn` helper + mini-site + engine tests                            | [05](./05-testing-docs-release.md) #3 | ⬜     |         |
+| 14 | robots.txt enforcement gate + directives                                    | [02](./02-crawl-engine.md) #4         | ⬜     |         |
 
 ## Backlog (ranked, post-sprint)
 
-| Rank | Task | Source | Status |
-|------|------|--------|--------|
-| 12 | Worker pool, politeness, streaming `run()` (incl. `beforeExtract` two-pass) | [02](./02-crawl-engine.md) #5 | ⬜ |
-| 13 | Fake-`FetchFn` helper + mini-site + engine tests | [05](./05-testing-docs-release.md) #3 | ⬜ |
-| 14 | robots.txt enforcement gate + directives | [02](./02-crawl-engine.md) #4 | ⬜ |
-| 15 | Events, stats, safeEmit, id threading | [02](./02-crawl-engine.md) #6 | ⬜ |
-| 16 | Budgets + `stoppedBy` semantics | [02](./02-crawl-engine.md) #7 | ⬜ |
-| 17 | Trap detection | [02](./02-crawl-engine.md) #8 | ⬜ |
-| 18 | `parseSitemap` | [01](./01-url-and-extraction.md) #7 | ⬜ |
-| 19 | PG schema DDL (5 tables, tenant-scoped) | [03](./03-pg-persistence.md) #3 | ⬜ |
-| 20 | `createCrawlerPg` factory + lifecycle plumbing | [03](./03-pg-persistence.md) #4 | ⬜ |
-| 21 | PG test harness (`tests/_pg.ts`, env, gating) | [03](./03-pg-persistence.md) #2 | ⬜ |
-| 22 | `PgFrontierStore` / `PgVisitedStore` | [03](./03-pg-persistence.md) #5 | ⬜ |
-| 23 | `persistPage` writers (body archive, links, ack) | [03](./03-pg-persistence.md) #6 | ⬜ |
-| 24 | Live progress writer (`__crawler_crawl.stats`) | [03](./03-pg-persistence.md) #1 | ⬜ |
-| 25 | Consumer query/reporting API (+`getCrawlByJobUid`, `recomputeStats`) | [03](./03-pg-persistence.md) #7 | ⬜ |
-| 26 | Incremental re-crawl mechanics (validators, 304 path) | [03](./03-pg-persistence.md) #8 | ⬜ |
-| 27 | PG integration tests | [05](./05-testing-docs-release.md) #4 | ⬜ |
-| 28 | `./steve` scaffold + serializable payload/result types | [04](./04-steve-jobs-integration.md) #1 | ⬜ |
-| 29 | `createCrawlJobHandler` factory | [04](./04-steve-jobs-integration.md) #6 | ⬜ |
-| 30 | Failure semantics + crash-resume on retry | [04](./04-steve-jobs-integration.md) #7 | ⬜ |
-| 31 | Enqueue + status helpers (`startCrawlJob`, polling) | [04](./04-steve-jobs-integration.md) #2 | ⬜ |
-| 32 | AbortSignal wiring | [04](./04-steve-jobs-integration.md) #5 | ⬜ |
-| 33 | Reaper + listing-window + type-blind-claiming guidance | [04](./04-steve-jobs-integration.md) #3–4 | ⬜ |
-| 34 | Steve integration tests + e2e | [04](./04-steve-jobs-integration.md) #9, [05](./05-testing-docs-release.md) #7 | ⬜ |
-| 35 | `scripts/build-npm.ts` real dependency list + entry points | [05](./05-testing-docs-release.md) #2 | ⬜ |
-| 36 | Recipes/examples dir (6 recipes) + job-mode recipe | [05](./05-testing-docs-release.md) #9, [04](./04-steve-jobs-integration.md) #8 | ⬜ |
-| 37 | README + AGENTS.md + `.env.example` | [05](./05-testing-docs-release.md) #5 | ⬜ |
-| 38 | Release flow checklist + dry-runs; mcp.ts backlog note | [05](./05-testing-docs-release.md) #8 | ⬜ |
+| Rank | Task                                                                 | Source                                                                         | Status |
+| ---- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------ | ------ |
+| 15   | Events, stats, safeEmit, id threading                                | [02](./02-crawl-engine.md) #6                                                  | ⬜     |
+| 16   | Budgets + `stoppedBy` semantics                                      | [02](./02-crawl-engine.md) #7                                                  | ⬜     |
+| 17   | Trap detection                                                       | [02](./02-crawl-engine.md) #8                                                  | ⬜     |
+| 18   | `parseSitemap`                                                       | [01](./01-url-and-extraction.md) #7                                            | ⬜     |
+| 19   | PG schema DDL (5 tables, tenant-scoped)                              | [03](./03-pg-persistence.md) #3                                                | ⬜     |
+| 20   | `createCrawlerPg` factory + lifecycle plumbing                       | [03](./03-pg-persistence.md) #4                                                | ⬜     |
+| 21   | PG test harness (`tests/_pg.ts`, env, gating)                        | [03](./03-pg-persistence.md) #2                                                | ⬜     |
+| 22   | `PgFrontierStore` / `PgVisitedStore`                                 | [03](./03-pg-persistence.md) #5                                                | ⬜     |
+| 23   | `persistPage` writers (body archive, links, ack)                     | [03](./03-pg-persistence.md) #6                                                | ⬜     |
+| 24   | Live progress writer (`__crawler_crawl.stats`)                       | [03](./03-pg-persistence.md) #1                                                | ⬜     |
+| 25   | Consumer query/reporting API (+`getCrawlByJobUid`, `recomputeStats`) | [03](./03-pg-persistence.md) #7                                                | ⬜     |
+| 26   | Incremental re-crawl mechanics (validators, 304 path)                | [03](./03-pg-persistence.md) #8                                                | ⬜     |
+| 27   | PG integration tests                                                 | [05](./05-testing-docs-release.md) #4                                          | ⬜     |
+| 28   | `./steve` scaffold + serializable payload/result types               | [04](./04-steve-jobs-integration.md) #1                                        | ⬜     |
+| 29   | `createCrawlJobHandler` factory                                      | [04](./04-steve-jobs-integration.md) #6                                        | ⬜     |
+| 30   | Failure semantics + crash-resume on retry                            | [04](./04-steve-jobs-integration.md) #7                                        | ⬜     |
+| 31   | Enqueue + status helpers (`startCrawlJob`, polling)                  | [04](./04-steve-jobs-integration.md) #2                                        | ⬜     |
+| 32   | AbortSignal wiring                                                   | [04](./04-steve-jobs-integration.md) #5                                        | ⬜     |
+| 33   | Reaper + listing-window + type-blind-claiming guidance               | [04](./04-steve-jobs-integration.md) #3–4                                      | ⬜     |
+| 34   | Steve integration tests + e2e                                        | [04](./04-steve-jobs-integration.md) #9, [05](./05-testing-docs-release.md) #7 | ⬜     |
+| 35   | `scripts/build-npm.ts` real dependency list + entry points           | [05](./05-testing-docs-release.md) #2                                          | ⬜     |
+| 36   | Recipes/examples dir (6 recipes) + job-mode recipe                   | [05](./05-testing-docs-release.md) #9, [04](./04-steve-jobs-integration.md) #8 | ⬜     |
+| 37   | README + AGENTS.md + `.env.example`                                  | [05](./05-testing-docs-release.md) #5                                          | ⬜     |
+| 38   | Release flow checklist + dry-runs; mcp.ts backlog note               | [05](./05-testing-docs-release.md) #8                                          | ⬜     |
 
 ## Open questions (collected; resolve with owner before the affected task)
 
@@ -241,7 +248,7 @@ Branch: `sprint-01-foundations`, continued.
   `<nav>`/`<header>`/`<footer>`/`<aside>` are already dropped by the extractor; and — the
   one **bug found in our own spec** — `<base href>` is gone from the narrowed HTML, so
   the engine must compute the effective base once from the raw document and pass it to
-  *both* extraction passes instead of letting the body pass re-derive it. Without that,
+  _both_ extraction passes instead of letting the body pass re-derive it. Without that,
   every relative link on a `<base>`-bearing page resolves wrongly and silently. Test
   required in doc 05. (task 12)
 
@@ -325,10 +332,10 @@ Branch: `sprint-01-foundations`, continued.
   task: `parseSitemap` is backlog rank 18, and a fixture with no parser is a fixture that
   rots. (task 9)
 
-- **2026-08-24** — Two fixtures doc 01 §5 describes as *large* are GENERATED at test
+- **2026-08-24** — Two fixtures doc 01 §5 describes as _large_ are GENERATED at test
   setup rather than committed: `giant.html` (the doc says so itself) and the 100k-line
   half of `robots/hostile.txt` (the doc does not, but the same reasoning applies — the
-  committed file carries the nasty *shapes*, the volume is built in-test). Both soft caps
+  committed file carries the nasty _shapes_, the volume is built in-test). Both soft caps
   of doc 01 §4 are now pinned: `MAX_PATTERN_LENGTH` by the committed file,
   `MAX_LINES` by the generated one. (task 9)
 
@@ -389,7 +396,7 @@ Branch: `sprint-01-foundations`, continued.
 
 - **2026-08-24** — `hostsAreSameSite(a, b, opts)` joins `./url`'s public surface and
   `isSameSite` is redefined as `hostnameOf` × it. Scope evaluation compares one target
-  against a set of seed *hostnames* once per discovered link, and the alternatives were
+  against a set of seed _hostnames_ once per discovered link, and the alternatives were
   both bad: synthesising a `https://${host}/` string per seed per link, or copying
   `isSameSite`'s mode switch — including the monotone no-registrable-domain fallback,
   which is exactly the subtlety a copy would drift on. Comparison inputs are normalized
@@ -454,9 +461,102 @@ Branch: `sprint-01-foundations`, continued.
 - **2026-08-24** — `tests/mod.test.ts` now also imports through the **published**
   specifiers (`@marianmeres/crawler`, `/url`, `/extract`, `/stores`) and asserts they
   resolve to the same modules with the same surfaces. Doc 05 §6 asks for the standalone
-  contract to be *proven*; the rest of the suite imports by relative path, which proves
+  contract to be _proven_; the rest of the suite imports by relative path, which proves
   nothing about packaging. A subpath that is declared but does not resolve now fails a
   test instead of `deno publish`. (task 11, review carry-over from task 9)
+
+- **2026-08-24** — The engine lands in three files, not doc 02's two: `channel.ts`
+  (the bounded hand-off), `stats.ts` (counters + snapshots) and `dispatcher.ts` (the
+  loop, the workers and link processing, plus everything `src/crawler.ts`'s two entry
+  points delegate to). `stats.ts` is doc 02 item 6's file and arrives one task early
+  because `PageContext.stats` and `CrawlReport.stats` are typed as a full `CrawlStats`
+  — a `run()` that cannot fill them does not type-check. What item 6 (task 15) still
+  owns is `safeEmit`, the call sites, and the throttled progress timer. (task 12)
+
+- **2026-08-24** — What task 12 deliberately leaves INERT, so a reader of the code is
+  not surprised: `options.events` (rank 15), `maxPages`/`maxDuration`/`maxTotalBytes`
+  and their `stoppedBy` values (rank 16), traps (rank 17) and the whole robots gate
+  including `X-Robots-Tag` and `nofollow` enforcement (rank 14 — `PageResult.robots` IS
+  populated from `<meta name=robots>`, because doc 05 §3's `beforeExtract` test asserts
+  meta-robots survives the two-pass split, but nothing acts on it yet). Live already:
+  `maxDepth`, `maxQueued` → `queue-full`, `duplicate`, `user`, and every synchronous
+  scope reason from task 10. `stoppedBy` currently ranges over
+  `completed`/`stop`/`abort`. (task 12)
+
+- **2026-08-24** — `Channel.relax()` exists to break a real deadlock, not for tidiness.
+  `stop()` must _deliver_ the pages already in flight, so it cannot close the channel
+  before they finish — but a worker parked on `push()` finishes only when the consumer
+  takes a value, and the obvious consumer spelling is `await crawler.stop()` _inside_
+  its own `for await` body, which never takes another. Graceful paths therefore drop the
+  capacity bound first, drain, then close; the extra memory is bounded by `concurrency`
+  results. The consumer-`break` path is the opposite and closes first, because there
+  `stop()`'s contract is that in-flight results are recorded but never delivered.
+  (task 12)
+
+- **2026-08-24** — **Seeds bypass `include`/`pathPrefix`; `add()` does not.** Those two
+  options narrow what a crawl _expands into_, and a seed is the instruction rather than
+  a discovery — without this, `crawl("https://a.com/", { scope: { pathPrefix: "/docs" }})`
+  fetches exactly nothing, which is nobody's intent. `exclude`, the scheme/length/
+  private-host checks and (from task 14) robots still apply to seeds: a deny-list is
+  never bypassable. `add()` is the deliberate opposite — doc 02 item 1 says a manual URL
+  is "subject to the same scope checks as any link", so it gets the full pipeline,
+  including the seed-host locality rule. (task 12)
+
+- **2026-08-24** — Seed/`add()` leniency: a bare `example.com` or `localhost:8080/x`
+  gets an `https://`. `normalizeUrl` refuses to invent a scheme by design (doc 01: link
+  extraction must never do that) and explicitly defers seed leniency to the engine. The
+  guard is that the authority has to _look_ like one — `/^[^\s/?#@:]+(:\d+)?$/` over
+  the text before the first `/?#` — so `localhost:8080/x` is accepted while
+  `mailto:a@b.com` stays rejected instead of silently becoming a crawl of `b.com` (the
+  `@` would otherwise read as userinfo). (task 12)
+
+- **2026-08-24** — `shouldVisit` runs **before** the frontier `push()` that detects
+  duplicates, inverting doc 02's steps 11 and 12. `push()` is the only atomic dedup and
+  it is destructive, so the doc's order would need either a `has()` on the store
+  contract (an extra PostgreSQL round-trip per link) or an engine-side mirror of the
+  frontier's dedup set — the exact duplication the PG store exists to avoid. The
+  visible consequence is that the hook is consulted **per edge**, so a URL linked from
+  ten pages asks ten times; that is consistent with its signature, which takes the
+  `LinkRecord` and the `referrer`, not just a URL. The recorded reason is still
+  `duplicate` for an already-queued target, because `push()` is what answers last.
+  (task 12)
+
+- **2026-08-24** — With `followCanonical: false` the canonical edge is recorded with
+  `skipReason: "excluded"`. Doc 02 requires the edge in the graph and requires it not to
+  become work, and the `SkipReason` union has no canonical-specific member; `"excluded"`
+  is already the union's option-driven rejection (it is what an `include` miss reports),
+  which is exactly what this is. Extending the public union for one flag was the
+  alternative and was rejected as the larger change. (task 12)
+
+- **2026-08-24** — `checkOnly` is **recomputed at claim time** from the URL rather than
+  carried on the frontier item: it is a pure function of the host and the scope options,
+  and `FrontierItem` has no room for engine flags (every field there is either dedup
+  key, ordering, or something `PageResult` inherits). This is why `isOnSeedSite` is now
+  exported from `src/engine/scope.ts` — the engine needs the same answer the scope
+  pipeline gives, and re-deriving the monotone same-site rule by hand is precisely the
+  copy task 10 warned against. (task 12, touches task 10's file)
+
+- **2026-08-24** — A `priority` function that throws, or returns a non-number, warns
+  once and falls back to depth ordering instead of failing the crawl. `priority` is not
+  one of doc 02's data-producing hooks (whose throws legitimately fail a page) — it is a
+  sort key, and killing a crawl over a sort key is wildly disproportionate to what one
+  does. (task 12)
+
+- **2026-08-24** — Every redirect hop **and** the final URL are marked visited with the
+  minimal `{crawledAt, status}` record, so another referrer pointing at a hop — or at
+  the destination — never re-fetches the same bytes. This is the case the memory
+  `VisitedStore`'s replace-don't-merge rule was written for (task 11). Also settled
+  here: `PageResult.ok` means "no error AND (2xx or 304)", so a hook or extraction that
+  throws makes a 200 page not-ok, and a raw conditional `304` counts as
+  success-unchanged exactly as doc 02 item 1 requires. (task 12)
+
+- **2026-08-24** — The dispatcher naps a bounded 50 ms only in one situation: the
+  frontier reports pending work, nothing is in flight, and no host is inside a
+  politeness window. The engine's own deferrals are all host-scheduled and produce an
+  exact wake-up time, so this can only be reached by a custom store that defers _items_
+  via `release(url, readyAt)` — for which the engine has no wake-up time at all. Every
+  other idle path parks on a promise a completion resolves, raced against a single
+  `setTimeout`, per doc 02's no-busy-waiting requirement. (task 12)
 
 ## How to resume (for a fresh conversation)
 

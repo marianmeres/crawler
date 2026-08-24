@@ -209,8 +209,15 @@ function extensionOf(pathname: string): string {
 	return ext.length > 0 && ext.length <= MAX_EXTENSION_LENGTH ? ext.toLowerCase() : "";
 }
 
-/** Is `host` on the site the crawl was seeded at, under the configured mode? */
-function onSeedSite(host: string, ctx: ScopeContext): boolean {
+/**
+ * Is `host` on the site the crawl was seeded at, under the configured mode?
+ *
+ * Exported because the engine needs the same answer at *claim* time — a `checkOnly`
+ * item is fetched body-less and never expanded, and re-deriving that from the URL is
+ * cheaper than finding a place to carry the flag through the frontier. Internal to the
+ * package: it is not on any `mod.ts`.
+ */
+export function isOnSeedSite(host: string, ctx: ScopeContext): boolean {
 	if (ctx.seedHosts.length === 0) return true;
 	const opts = {
 		subdomains: ctx.scope.subdomains,
@@ -289,7 +296,7 @@ export function evaluateScope(to: string | URL, ctx: ScopeContext): ScopeVerdict
 	}
 
 	// 3. out-of-scope — off the crawl's site, or outside the requested path
-	const offSite = ctx.kind === "external" || !onSeedSite(url.hostname, ctx);
+	const offSite = ctx.kind === "external" || !isOnSeedSite(url.hostname, ctx);
 	if (offSite && !scope.allowExternal && !scope.checkExternal) {
 		return SKIP["out-of-scope"];
 	}

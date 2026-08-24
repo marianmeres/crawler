@@ -2,27 +2,21 @@
  * The two entry points: {@linkcode createCrawler} (streaming, the primary API) and
  * {@linkcode crawl} (collect-everything convenience).
  *
- * > **Status.** This module currently provides the *contract* only. Option resolution
- * > and validation are real — a bad option throws at `createCrawler()` — but the engine
- * > behind `run()` (dispatcher, worker pool, politeness, scope, robots, traps) is not
- * > written yet, and every operational method throws until it is.
+ * Both are thin: options are resolved and validated at construction, and everything
+ * after that is `src/engine/dispatcher.ts` — the dispatcher loop, the worker pool,
+ * per-host politeness and the bounded channel behind `run()`.
  *
  * @module
  */
 
-import { resolveCrawlOptions } from "./options.ts";
-import type { Crawler, CrawlOptions, CrawlReport } from "./types.ts";
-
-/**
- * Uniform, greppable failure for the parts of {@linkcode Crawler} that need the engine.
- * Deliberately loud: half-working crawl semantics would be far worse than a throw.
- */
-function notImplemented(member: string): never {
-	throw new Error(
-		`[crawler] ${member} is not implemented yet — this version ships the public ` +
-			`type surface and option resolution only.`,
-	);
-}
+import { CrawlEngine } from "./engine/dispatcher.ts";
+import type {
+	Crawler,
+	CrawlOptions,
+	CrawlReport,
+	CrawlStats,
+	PageResult,
+} from "./types.ts";
 
 /**
  * Create a configured, single-use crawler.
@@ -47,22 +41,18 @@ function notImplemented(member: string): never {
  * ```
  */
 export function createCrawler(options: CrawlOptions = {}): Crawler {
-	// for the validation; the engine will keep the result once it exists
-	resolveCrawlOptions(options);
-
-	const crawlId = crypto.randomUUID();
+	const engine = new CrawlEngine(options);
 
 	return {
-		crawlId,
-		add: () => notImplemented("Crawler.add()"),
-		run: () => notImplemented("Crawler.run()"),
-		stop: () => notImplemented("Crawler.stop()"),
-		abort: () => notImplemented("Crawler.abort()"),
-		stats: () => notImplemented("Crawler.stats()"),
-		report: () => notImplemented("Crawler.report()"),
-		// not a stub: disposal releases engine-owned fetchers, and a crawler that never
-		// ran owns none
-		[Symbol.asyncDispose]: () => Promise.resolve(),
+		crawlId: engine.crawlId,
+		add: (urls, init) => engine.add(urls, init),
+		run: (seeds?: string | string[]): AsyncIterableIterator<PageResult> =>
+			engine.run(seeds),
+		stop: (reason?: string): Promise<void> => engine.stop(reason),
+		abort: (reason?: string): void => engine.abort(reason),
+		stats: (): CrawlStats => engine.stats(),
+		report: (): CrawlReport | undefined => engine.report(),
+		[Symbol.asyncDispose]: (): Promise<void> => engine.dispose(),
 	};
 }
 
