@@ -301,6 +301,14 @@ interface Requested {
 	checkExternal: boolean;
 	assets: boolean;
 	sitemaps: boolean;
+	/**
+	 * `normalize.trailingSlash: "strip"`. Off by default, matching the library — see the
+	 * note in `./url`: `/a` and `/a/` are not interchangeable, and a directory-style site
+	 * answers the slashless spelling with a 301 rather than the page.
+	 */
+	stripTrailingSlash: boolean;
+	/** `normalize.stripWww` — folds `www.a.com` and `a.com` into one frontier key. */
+	stripWww: boolean;
 	respectRobots: boolean;
 	persistBody: boolean;
 	/** Route every document through a real browser, so the DOM is the post-JS one. */
@@ -419,6 +427,12 @@ function clamp(body: Partial<Requested>): Clamped {
 		},
 		extract: { assets: body.assets === true },
 		robots: { respect, sitemaps: body.sitemaps === true },
+		// sent explicitly, defaults included: the crawl row keeps `options` verbatim, and
+		// a run reopened next week should say what it was actually normalized with
+		normalize: {
+			trailingSlash: body.stripTrailingSlash === true ? "strip" : "keep",
+			stripWww: body.stripWww === true,
+		},
 	};
 
 	return {

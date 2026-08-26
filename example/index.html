@@ -794,6 +794,15 @@
 									Seed from robots.txt sitemaps
 								</label>
 								<label>
+									<input type="checkbox"
+										data-ref="stripTrailingSlash" />
+									Normalize: strip trailing slashes (/a/ &rarr; /a)
+								</label>
+								<label>
+									<input type="checkbox" data-ref="stripWww" />
+									Normalize: strip www.
+								</label>
+								<label>
 									<input type="checkbox" data-ref="respectRobots" checked />
 									Respect robots.txt
 								</label>
@@ -808,6 +817,12 @@
 										data-ref="jsLabel">Render with JS (browser)</span>
 								</label>
 							</div>
+
+							<p class="muted" style="margin: 0.1rem 0 0">
+								A directory-style site publishes /a/ and answers /a with
+								a 301, so stripping buys a redirect per page. Off by
+								default, which is the library default too.
+							</p>
 
 							<p class="muted" data-ref="jsHint"
 								style="margin: 0.1rem 0 0"></p>

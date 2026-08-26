@@ -213,11 +213,20 @@ const secs = (ms: number): string => {
 		: `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
 };
 
-/** `https://a.com/b/c?d` → `/b/c?d`, so the column reads as a site map rather than noise. */
-const short = (url: string): string => {
+/**
+ * `https://a.com/b/c?d` → `/b/c?d`, so the column reads as a site map rather than noise.
+ *
+ * Only for `home` — the origin the crawl was seeded from. A crawl routinely spans more
+ * than one: a site behind a TLS-terminating proxy redirects every `https:` page to its
+ * `http:` twin, and those are two different URLs the crawler is right to keep apart.
+ * Hiding the origin there would render them as two identical-looking rows, which reads
+ * as a dedup bug in the crawler rather than as what it is.
+ */
+const short = (url: string, home?: string): string => {
 	try {
 		const u = new URL(url);
-		return (u.pathname + u.search) || "/";
+		const path = (u.pathname + u.search) || "/";
+		return home !== undefined && u.origin !== home ? u.origin + path : path;
 	} catch {
 		return url;
 	}
@@ -228,6 +237,14 @@ const host = (url: string): string => {
 		return new URL(url).host;
 	} catch {
 		return "";
+	}
+};
+
+const originOf = (url: string): string | undefined => {
+	try {
+		return new URL(url).origin;
+	} catch {
+		return undefined;
 	}
 };
 
@@ -278,6 +295,8 @@ const app = createView((track) => {
 	/** What is on screen right now, so Stop and the broken report know their target. */
 	let current: { mode: Mode; uid: string } | null = null;
 	let cursors = { pages: 0, links: 0 };
+	/** Origin of the run's first seed — what `short()` is allowed to leave off. */
+	let home: string | undefined;
 	let totals = { pages: 0, links: 0 };
 	let brokenLoaded = false;
 	let timer: ReturnType<typeof setTimeout> | undefined;
@@ -307,6 +326,8 @@ const app = createView((track) => {
 		checkExternal: on("checkExternal"),
 		assets: on("assets"),
 		sitemaps: on("sitemaps"),
+		stripTrailingSlash: on("stripTrailingSlash"),
+		stripWww: on("stripWww"),
 		respectRobots: on("respectRobots"),
 		persistBody: on("persistBody"),
 		js: on("js"),
@@ -348,6 +369,7 @@ const app = createView((track) => {
 	const reset = (): void => {
 		closeModal();
 		byUrl.clear();
+		home = undefined;
 		cursors = { pages: 0, links: 0 };
 		totals = { pages: 0, links: 0 };
 		brokenLoaded = false;
@@ -424,7 +446,7 @@ const app = createView((track) => {
 			q.status.textContent = code == null ? (p.errorKind ?? "error") : String(code);
 			q.status.classList.add(`st-${code == null ? "x" : String(code)[0]}`);
 			q.depth.textContent = String(p.depth);
-			q.url.textContent = short(p.finalUrl ?? p.url);
+			q.url.textContent = short(p.finalUrl ?? p.url, home);
 			q.title.textContent = p.errorMessage ??
 				(p.skipReason ? `skipped: ${p.skipReason}` : (p.title ?? ""));
 			q.type.textContent = (p.contentType ?? "").split(";")[0];
@@ -449,8 +471,8 @@ const app = createView((track) => {
 			const node = fromTemplate("tpl-link-row");
 			const q = refs(node);
 			node.classList.add(l.followed ? "is-followed" : "is-skipped");
-			q.to.textContent = l.kind === "external" ? l.toUrl : short(l.toUrl);
-			q.from.textContent = `from ${short(l.fromUrl)}`;
+			q.to.textContent = l.kind === "external" ? l.toUrl : short(l.toUrl, home);
+			q.from.textContent = `from ${short(l.fromUrl, home)}`;
 			q.kind.textContent = l.kind === "external"
 				? host(l.toUrl) || "external"
 				: "internal";
@@ -484,7 +506,9 @@ const app = createView((track) => {
 			const node = fromTemplate("tpl-broken-row");
 			const q = refs(node);
 			q.url.textContent = b.toUrl;
-			q.from.textContent = b.fromUrls.slice(0, 3).map(short).join(", ") +
+			q.from.textContent = b.fromUrls.slice(0, 3).map((u) =>
+				short(u, home)
+			).join(", ") +
 				(b.fromUrls.length > 3 ? ` +${b.fromUrls.length - 3} more` : "");
 			q.status.textContent = b.status == null
 				? (b.errorKind ?? "error")
@@ -606,7 +630,7 @@ const app = createView((track) => {
 		r.modalHost.appendChild(el);
 		selectModalTab("preview");
 
-		m.title.textContent = page.title || short(page.finalUrl ?? page.url);
+		m.title.textContent = page.title || short(page.finalUrl ?? page.url, home);
 		m.url.textContent = page.finalUrl ?? page.url;
 		const badge = (text: string, kind = "") => {
 			const b = document.createElement("span");
@@ -691,6 +715,11 @@ const app = createView((track) => {
 
 		cursors.pages += snap.pages.length;
 		cursors.links += snap.links.length;
+		// from the crawl row, not from the form: a reopened run has to get it from the
+		// seeds it actually ran with
+		if (home === undefined && snap.crawl?.seeds?.length) {
+			home = originOf(snap.crawl.seeds[0]);
+		}
 
 		if (snap.job) {
 			setBadge(r.jobBadge, `job: ${snap.job.status}`, statusKind(snap.job.status));
