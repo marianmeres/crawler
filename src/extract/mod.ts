@@ -10,7 +10,8 @@
  * inspectable structure plus a compiled path matcher (and ships the allow-all /
  * disallow-all values the crawl loop's fetch policy needs), while
  * {@linkcode parseMetaRobots} and {@linkcode parseXRobotsTag} read the per-page
- * directives that decide whether a page's links may be followed.
+ * directives that decide whether a page's links may be followed. {@linkcode parseSitemap}
+ * reads the documents a robots.txt `Sitemap:` line points at.
  *
  * Everything here is total: malformed input yields fewer results, never an exception,
  * because a crawler meets malformed input on a normal day.
@@ -35,6 +36,9 @@ export type { RobotsGroup, RobotsRule, RobotsTxt } from "./robots-txt.ts";
 
 export { parseMetaRobots, parseXRobotsTag } from "./meta-robots.ts";
 export type { RobotsDirectives } from "./meta-robots.ts";
+
+export { parseSitemap } from "./sitemap.ts";
+export type { SitemapEntry, SitemapIndexEntry, SitemapParseResult } from "./sitemap.ts";
 
 export type {
 	ExtractOptions,

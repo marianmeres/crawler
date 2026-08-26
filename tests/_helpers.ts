@@ -202,7 +202,7 @@ export const SITE = "http://site.test";
  * - `/private/secret` is what `/robots.txt` disallows.
  * - `/t/a/b/a/b/a/b` is a repeated-segment trap.
  * - `http://ext.test/x` is off-site.
- * - `/sitemap.xml` and `/sitemap-only` exist for `robots.sitemaps` (backlog rank 18).
+ * - `/sitemap-only` is linked from nowhere: `robots.sitemaps` is the only way to reach it.
  */
 export const SMALL_SITE: MiniSite = {
 	[`${SITE}/`]: {

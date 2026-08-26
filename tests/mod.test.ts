@@ -34,6 +34,7 @@ const EXTRACT_EXPORTS = [
 	"extractTitle",
 	"parseMetaRobots",
 	"parseRobotsTxt",
+	"parseSitemap",
 	"parseXRobotsTag",
 	"robotsAllowAll",
 	"robotsDisallowAll",

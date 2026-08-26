@@ -72,8 +72,15 @@ export interface RobotsGate {
 	 * origins the crawl has reached.
 	 */
 	crawlDelayMs(host: string): number;
-	/** `Sitemap:` values from an origin's cached rules; empty when it has none. */
-	sitemapUrls(origin: string): string[];
+	/**
+	 * `Sitemap:` values of an origin, fetching and caching its robots.txt on the first
+	 * miss like {@linkcode RobotsGate.isAllowed} does.
+	 *
+	 * The one thing here that ignores {@linkcode RobotsGateOptions.respect}: sitemap
+	 * seeding is not enforcement, and `{ respect: false, sitemaps: true }` is a coherent
+	 * pair — "do not obey the rules, but do take the map".
+	 */
+	sitemapUrls(origin: string): Promise<string[]>;
 	/** Release the transport, if this gate built one. Idempotent. */
 	dispose(): Promise<void>;
 }
@@ -196,8 +203,8 @@ export function createRobotsGate(opts: RobotsGateOptions): RobotsGate {
 			return delays.get(host) ?? 0;
 		},
 
-		sitemapUrls(origin: string): string[] {
-			return cache.get(origin)?.sitemaps ?? [];
+		async sitemapUrls(origin: string): Promise<string[]> {
+			return (await rulesFor(origin)).sitemaps;
 		},
 
 		async dispose(): Promise<void> {

@@ -34,8 +34,10 @@ import type {
 
 import { extractBaseHref, extractLinks, extractTitle } from "../extract/extract-links.ts";
 import { parseMetaRobots, parseXRobotsTag } from "../extract/meta-robots.ts";
+import { parseSitemap } from "../extract/sitemap.ts";
 import type { ExtractLinksOptions } from "../extract/extract-links.ts";
 import type { RobotsDirectives } from "../extract/meta-robots.ts";
+import type { SitemapParseResult } from "../extract/sitemap.ts";
 import type { RawLink } from "../extract/types.ts";
 import { resolveCrawlOptions } from "../options.ts";
 import type { ResolvedCrawlOptions } from "../options.ts";
@@ -86,6 +88,14 @@ const IDLE_NAP_MS = 50;
 /** How many redirect hops of one response are marked visited. Purely a sanity bound. */
 const MAX_RECORDED_REDIRECTS = 50;
 
+/**
+ * How many sitemap documents `robots.sitemaps` fetches per origin, the children of a
+ * `<sitemapindex>` included. A large site legitimately publishes dozens; nothing
+ * legitimate publishes hundreds, and the cap is what keeps a robots.txt from scripting
+ * an unbounded run of requests before the crawl has fetched a single page.
+ */
+const MAX_SITEMAP_DOCS = 50;
+
 /** Per-host scheduling state owned by the dispatcher. */
 interface HostState {
 	/** Workers currently fetching this host. */
@@ -102,10 +112,14 @@ type EnqueueOutcome =
 	| "pushed"
 	| Extract<SkipReason, "duplicate" | "queue-full" | "max-pages">;
 
-/** A URL the consumer handed us through {@linkcode CrawlEngine.add}. */
+/**
+ * A URL that entered the crawl as an instruction rather than as a discovery:
+ * {@linkcode CrawlEngine.add}, or a `<loc>` from a sitemap.
+ */
 interface ManualAdd {
 	url: string;
 	depth: number;
+	via: DiscoveredVia;
 	meta?: Record<string, unknown>;
 }
 
@@ -245,7 +259,7 @@ export class CrawlEngine {
 				this.#opts.logger?.warn(`[crawl] add(): not a usable URL: ${raw}`);
 				continue;
 			}
-			this.#manual.push({ url, depth, meta: init?.meta });
+			this.#manual.push({ url, depth, via: "manual", meta: init?.meta });
 		}
 		this.#signal();
 	}
@@ -362,6 +376,7 @@ export class CrawlEngine {
 		this.#armDeadline();
 
 		for (const url of normalized) await this.#enqueueSeed(url);
+		if (this.#opts.robots.sitemaps) await this.#seedFromSitemaps(normalized);
 
 		// `stop()`, `abort()` or `dispose()` can land while the seeds are still being
 		// enqueued — starting the dispatcher after that point would resurrect a crawl
@@ -1209,10 +1224,129 @@ export class CrawlEngine {
 		const outcome = await this.#enqueue({
 			url: entry.url,
 			depth: entry.depth,
-			discoveredVia: "manual",
+			discoveredVia: entry.via,
 			meta: entry.meta,
 		});
 		return outcome === "pushed" ? undefined : outcome;
+	}
+
+	// -------------------------------------------------------------------------------
+	// sitemaps
+	// -------------------------------------------------------------------------------
+
+	/**
+	 * `robots.sitemaps`: turn the `Sitemap:` lines of the **seed** origins into depth-0
+	 * work, before the dispatcher starts.
+	 *
+	 * Three choices worth knowing about:
+	 *
+	 * - **Seed origins only.** An origin the crawl merely reaches has a robots.txt but no
+	 *   claim on what the crawl is *for*; seeding from it would let one off-site link
+	 *   pull in a whole second site's map.
+	 * - **Awaited, not raced.** These URLs are the crawl's starting set, so a dispatcher
+	 *   started alongside the fetch could run the frontier dry and finish before the map
+	 *   arrived. The cost is that a slow sitemap delays the first page.
+	 * - **Same origin as the robots.txt that named it.** The sitemap protocol's
+	 *   cross-submission rule, and here also the thing that stops a `Sitemap:` line from
+	 *   being a request-forgery primitive — it is the one URL in the whole engine that
+	 *   would otherwise be fetched without passing the scope pipeline. The `<loc>` values
+	 *   inside are unaffected: those go through scope, robots and the private-host guard
+	 *   like any other candidate.
+	 */
+	async #seedFromSitemaps(seeds: readonly string[]): Promise<void> {
+		const origins = [...new Set(seeds.map(originOf))].filter((o) => o !== "");
+		for (const origin of origins) {
+			if (this.#shutdownPromise !== undefined) return;
+			await this.#seedFromOrigin(origin);
+		}
+	}
+
+	async #seedFromOrigin(origin: string): Promise<void> {
+		// `Sitemap:` values are kept verbatim by the parser, and a relative one is common
+		// enough to be worth resolving rather than dropping
+		const normalize = this.#opts.normalize;
+		const queue = (await this.#robots!.sitemapUrls(origin))
+			.map((raw) => normalizeUrl(raw, `${origin}/robots.txt`, normalize))
+			.filter((url): url is string => url !== null)
+			.map((url) => ({ url, level: 0 }));
+
+		const seen = new Set<string>();
+		// `queue` grows while it is walked: a `<sitemapindex>` appends its children
+		for (let i = 0; i < queue.length; i++) {
+			const { url, level } = queue[i];
+			if (this.#shutdownPromise !== undefined) return;
+			if (seen.has(url)) continue;
+
+			if (originOf(url) !== origin) {
+				this.#opts.logger?.warn(
+					`[crawl] ${origin}/robots.txt names the cross-origin sitemap ${url} — ` +
+						`ignored`,
+				);
+				continue;
+			}
+			if (seen.size >= MAX_SITEMAP_DOCS) {
+				this.#opts.logger?.warn(
+					`[crawl] ${origin} names more than ${MAX_SITEMAP_DOCS} sitemap ` +
+						`documents — the rest are ignored`,
+				);
+				return;
+			}
+			seen.add(url);
+
+			const parsed = await this.#fetchSitemap(url);
+			if (parsed === undefined) continue;
+
+			if (parsed.kind === "sitemapindex") {
+				// followed exactly one level: an index that lists indexes is either a
+				// mistake or a loop, and neither is worth a recursion budget
+				if (level > 0) continue;
+				for (const child of parsed.sitemaps) {
+					const next = normalizeUrl(child.url, url, normalize);
+					if (next !== null) queue.push({ url: next, level: 1 });
+				}
+				continue;
+			}
+
+			for (const entry of parsed.entries) {
+				const target = normalizeUrl(entry.url, url, normalize);
+				if (target === null) {
+					// a `<loc>` that is not a fetchable URL is still a candidate that was
+					// rejected, and this crawler does not drop candidates silently
+					this.#stats.recordSkip("bad-scheme");
+					continue;
+				}
+				// the same path an `add()` takes: full scope, robots, visited and the
+				// queue cap — a sitemap is a suggestion, not an exemption
+				const reason = await this.#enqueueManual({
+					url: target,
+					depth: 0,
+					via: "sitemap",
+				});
+				if (reason !== undefined) this.#stats.recordSkip(reason);
+			}
+		}
+	}
+
+	/** Fetch and parse one sitemap document; `undefined` when it was not readable. */
+	async #fetchSitemap(url: string): Promise<SitemapParseResult | undefined> {
+		try {
+			const res = await this.#fetch!({
+				url,
+				retainBody: true,
+				signal: this.#requestSignal(),
+				meta: { crawlId: this.crawlId },
+			});
+			if (!res.ok || !res.hasBody) {
+				this.#opts.logger?.warn(
+					`[crawl] sitemap ${url} answered ${res.status} — ignored`,
+				);
+				return undefined;
+			}
+			return parseSitemap(await decodeSitemapBody(await res.bytes()));
+		} catch (e) {
+			this.#opts.logger?.warn(`[crawl] sitemap ${url} could not be read:`, e);
+			return undefined;
+		}
 	}
 
 	/**
@@ -1418,12 +1552,6 @@ export class CrawlEngine {
 				`[crawl] robots.respect is false — this crawl ignores robots.txt`,
 			);
 		}
-		if (robots.sitemaps) {
-			this.#opts.logger?.warn(
-				`[crawl] robots.sitemaps is not implemented yet — Sitemap: lines are ` +
-					`parsed and readable, but nothing is seeded from them`,
-			);
-		}
 	}
 
 	async #disposeFetcher(): Promise<void> {
@@ -1456,6 +1584,40 @@ function hostOf(url: string): string {
 	} catch {
 		return "";
 	}
+}
+
+/** `new URL(url).origin`, or `""` for anything that is not a URL. */
+function originOf(url: string): string {
+	try {
+		return new URL(url).origin;
+	} catch {
+		return "";
+	}
+}
+
+/**
+ * A sitemap body as text, gunzipped when it is gzipped.
+ *
+ * The decision is made on the **magic number**, not on the `.gz` suffix and not on the
+ * content type: a `.xml.gz` is routinely served as `application/octet-stream` or even as
+ * `text/xml`, and the two bytes are the only signal that cannot lie. A body that is not
+ * gzip is decoded as UTF-8, which the sitemap protocol requires.
+ *
+ * Exported for its own unit test — the fake transport used by the engine suites carries
+ * strings, so the compressed path has no other way to be exercised.
+ */
+export async function decodeSitemapBody(bytes: Uint8Array): Promise<string> {
+	if (bytes[0] !== 0x1f || bytes[1] !== 0x8b) return new TextDecoder().decode(bytes);
+
+	const gzipped = new ReadableStream<BufferSource>({
+		start(controller) {
+			controller.enqueue(bytes as BufferSource);
+			controller.close();
+		},
+	});
+	return await new Response(
+		gzipped.pipeThrough(new DecompressionStream("gzip")),
+	).text();
 }
 
 /** Map anything thrown into the `PageResult.error` shape. */

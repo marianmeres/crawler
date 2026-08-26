@@ -128,11 +128,17 @@ export interface RobotsOptions {
 	 */
 	respect?: boolean;
 	/**
-	 * Seed the frontier from the `Sitemap:` lines of each origin's robots.txt.
-	 * Default `false`.
+	 * Seed the frontier from the `Sitemap:` lines of the **seed** origins' robots.txt,
+	 * before the first page is fetched. Default `false`.
 	 *
-	 * **Not implemented yet** — it needs a sitemap parser. `Sitemap:` lines are already
-	 * parsed and cached; setting this warns once and seeds nothing.
+	 * Each document is parsed with `./extract`'s `parseSitemap`, a `.xml.gz` body is
+	 * gunzipped, and a `<sitemapindex>` is followed one level — at most 50 documents per
+	 * origin, and only documents on that same origin. The URLs they list are enqueued at
+	 * depth 0 with `discoveredVia: "sitemap"` and are subject to every check a link is:
+	 * scope, `exclude`/`include`, robots.txt, the visited set and `maxQueued`.
+	 *
+	 * Independent of {@linkcode RobotsOptions.respect}: `{ respect: false, sitemaps: true }`
+	 * reads the map without obeying the rules, and does fetch robots.txt to get it.
 	 */
 	sitemaps?: boolean;
 	/** Cap on an honored `Crawl-delay`, in ms. Default `30_000`. */
