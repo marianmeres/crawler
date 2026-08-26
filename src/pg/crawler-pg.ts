@@ -61,6 +61,11 @@ export interface CrawlerPgOptions {
 	 * back on" corner), so a bodyless URL is always re-fetched in full.
 	 */
 	persistBody?: boolean | ((res: PageResult) => boolean);
+	/**
+	 * The floor between two {@linkcode CrawlPersistence.progress} writes, in ms.
+	 * Default `1000`, `0` writes every call.
+	 */
+	progressThrottleMs?: number;
 	/** Silent when absent. */
 	logger?: Logger;
 }
@@ -110,11 +115,24 @@ export interface CrawlPersistence {
 	 */
 	persistPage(res: PageResult, ctx?: { fetchResult?: FetchResult }): Promise<void>;
 	/**
+	 * Publishes a live snapshot into `__crawler_crawl.stats`, which is the only way to
+	 * watch a long crawl from another process.
+	 *
+	 * Wire it straight to `events.onProgress`: writes are throttled to one per
+	 * {@linkcode CrawlerPgOptions.progressThrottleMs} per handle, calls inside that window
+	 * resolve at once and the last of them is flushed when the window elapses. A failing
+	 * write is logged and swallowed — progress never fails a crawl.
+	 */
+	progress(stats: CrawlStats): Promise<void>;
+	/**
 	 * `pending` (or a resumed `failed`/`stopped`) → `running`. The first call stamps
 	 * `startedAt`; later ones keep it, so a resumed attempt reports the original start.
 	 */
 	markRunning(): Promise<void>;
-	/** Terminal. `stats` is force-written when given, otherwise the last snapshot stands. */
+	/**
+	 * Terminal, and it force-writes past the progress throttle: `stats` when given,
+	 * otherwise a snapshot the throttle was still holding, otherwise the stored one.
+	 */
 	markEnded(end: {
 		status: "completed" | "failed" | "stopped";
 		stoppedBy?: StoppedBy;
@@ -135,6 +153,8 @@ export interface CrawlerContext {
 	tenantId: string;
 	/** Resolved to a value: the option's `undefined` means `true`. */
 	persistBody: boolean | ((res: PageResult) => boolean);
+	/** Resolved to a non-negative number. */
+	progressThrottleMs: number;
 	logger?: Logger;
 	/** Resolves once the schema is installed; every DB method awaits it first. */
 	ready(): Promise<void>;
@@ -146,6 +166,14 @@ class CrawlHandle implements CrawlPersistence {
 	#ctx: CrawlerContext;
 	#row: CrawlRow;
 	readonly stores: { frontier: FrontierStore; visited: VisitedStore };
+	/**
+	 * Throttle state, per handle and never shared: two crawls running on one
+	 * {@linkcode CrawlerPg} must not consume each other's window.
+	 */
+	#lastProgressAt = 0;
+	#pendingStats: CrawlStats | null = null;
+	#progressTimer: ReturnType<typeof setTimeout> | undefined;
+	#ended = false;
 
 	constructor(ctx: CrawlerContext, row: CrawlRow) {
 		this.#ctx = ctx;
@@ -162,6 +190,50 @@ class CrawlHandle implements CrawlPersistence {
 
 	persistPage(res: PageResult, ctx?: { fetchResult?: FetchResult }): Promise<void> {
 		return persistPage(this.#ctx, this.#row.id, res, ctx?.fetchResult);
+	}
+
+	async progress(stats: CrawlStats): Promise<void> {
+		const wait = this.#lastProgressAt + this.#ctx.progressThrottleMs - Date.now();
+		if (wait <= 0 && this.#progressTimer === undefined) {
+			await this.#writeStats(stats);
+			return;
+		}
+		this.#pendingStats = stats;
+		this.#progressTimer ??= setTimeout(() => {
+			this.#progressTimer = undefined;
+			const pending = this.#pendingStats;
+			this.#pendingStats = null;
+			if (pending) void this.#writeStats(pending);
+		}, wait);
+	}
+
+	/** Never throws: see {@linkcode CrawlPersistence.progress}. */
+	async #writeStats(stats: CrawlStats): Promise<void> {
+		// a snapshot that lost the race to markEnded would resurrect a mid-run count
+		if (this.#ended) return;
+		this.#lastProgressAt = Date.now();
+		try {
+			await this.#ctx.ready();
+			const { rows } = await this.#ctx.db.query(
+				`UPDATE ${this.#ctx.tableNames.tableCrawl}
+					SET stats = $2::jsonb, updated_at = NOW()
+					WHERE id = $1
+					RETURNING *`,
+				[this.#row.id, JSON.stringify(stats)],
+			);
+			if (rows[0]) this.#row = toCrawlRow(rows[0]);
+		} catch (e) {
+			this.#ctx.logger?.warn(`Crawl progress write failed: ${e}`);
+		}
+	}
+
+	/** Drops the throttle's trailing write, returning the snapshot it was holding. */
+	#takePendingStats(): CrawlStats | null {
+		clearTimeout(this.#progressTimer);
+		this.#progressTimer = undefined;
+		const pending = this.#pendingStats;
+		this.#pendingStats = null;
+		return pending;
 	}
 
 	async markRunning(): Promise<void> {
@@ -184,6 +256,9 @@ class CrawlHandle implements CrawlPersistence {
 		error?: string;
 		stats?: CrawlStats;
 	}): Promise<void> {
+		const pending = this.#takePendingStats();
+		const finalStats = end.stats ?? pending;
+		this.#ended = true;
 		await this.#ctx.ready();
 		const { rows } = await this.#ctx.db.query(
 			`UPDATE ${this.#ctx.tableNames.tableCrawl}
@@ -200,7 +275,7 @@ class CrawlHandle implements CrawlPersistence {
 				end.status,
 				end.stoppedBy ?? null,
 				end.error ?? null,
-				end.stats ? JSON.stringify(end.stats) : null,
+				finalStats ? JSON.stringify(finalStats) : null,
 			],
 		);
 		this.#row = toCrawlRow(rows[0]);
@@ -237,6 +312,7 @@ export class CrawlerPg {
 			tableNames: this.#tableNames,
 			tenantId: this.#tenantId,
 			persistBody: options.persistBody ?? true,
+			progressThrottleMs: Math.max(0, options.progressThrottleMs ?? 1000),
 			logger: this.#logger,
 			ready: () => this.#initOnce(),
 			transaction: (fn) => withTransaction(this.#db, (client) => fn(client)),

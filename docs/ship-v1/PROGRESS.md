@@ -71,7 +71,7 @@ Branch: `sprint-03-pg`
 | ✅ | T20 | T19 | `createCrawlerPg` factory + lifecycle | [02](./02-pg-persistence.md) T20 | 3b311c0 |
 | ✅ | T22 | T20 | `PgFrontierStore` / `PgVisitedStore` | [02](./02-pg-persistence.md) T22 | — |
 | ✅ | T23 | T22 | `persistPage` writers | [02](./02-pg-persistence.md) T23 | — |
-| ⬜ | T24 | T20 | Live progress writer | [02](./02-pg-persistence.md) T24 | — |
+| ✅ | T24 | T20 | Live progress writer | [02](./02-pg-persistence.md) T24 | — |
 | ⬜ | T25 | T23 | Consumer query / reporting API | [02](./02-pg-persistence.md) T25 | — |
 | ⬜ | T26 | T23 T25 | Incremental re-crawl (validators, 304 path) | [02](./02-pg-persistence.md) T26 | — |
 | ⬜ | T27 | T22 T23 T25 | PG integration tests | [02](./02-pg-persistence.md) T27 | — |
