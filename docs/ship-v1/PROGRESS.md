@@ -105,7 +105,7 @@ Branch: `sprint-05-release`
 | Status | ID | Deps | Task | Source | Commit |
 |--------|----|------|------|--------|--------|
 | ✅ | T35 | T20 T28 | npm build: entry points + real dependency list | [04](./04-packaging-docs-release.md) T35 | — |
-| ⬜ | T36 | T26 T29 | Recipes / examples dir (6 recipes) | [04](./04-packaging-docs-release.md) T36 | — |
+| ✅ | T36 | T26 T29 | Recipes / examples dir (6 recipes) | [04](./04-packaging-docs-release.md) T36 | — |
 | ⬜ | T37 | T33 T36 | README + AGENTS.md + `.env.example` | [04](./04-packaging-docs-release.md) T37 | — |
 | ⬜ | T38 | T35 T37 | Release checklist + dry runs | [04](./04-packaging-docs-release.md) T38 | — |
 
