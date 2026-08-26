@@ -69,12 +69,12 @@ Branch: `sprint-03-pg`
 | ✅ | T21 | — | PG test harness, env and gating | [02](./02-pg-persistence.md) T21 | 99c27c6 |
 | ✅ | T19 | T21 | Schema DDL — the 5 tables | [02](./02-pg-persistence.md) T19 | a92b1c3 |
 | ✅ | T20 | T19 | `createCrawlerPg` factory + lifecycle | [02](./02-pg-persistence.md) T20 | 3b311c0 |
-| ✅ | T22 | T20 | `PgFrontierStore` / `PgVisitedStore` | [02](./02-pg-persistence.md) T22 | — |
-| ✅ | T23 | T22 | `persistPage` writers | [02](./02-pg-persistence.md) T23 | — |
-| ✅ | T24 | T20 | Live progress writer | [02](./02-pg-persistence.md) T24 | — |
-| ✅ | T25 | T23 | Consumer query / reporting API | [02](./02-pg-persistence.md) T25 | — |
-| ✅ | T26 | T23 T25 | Incremental re-crawl (validators, 304 path) | [02](./02-pg-persistence.md) T26 | — |
-| ✅ | T27 | T22 T23 T25 | PG integration tests | [02](./02-pg-persistence.md) T27 | — |
+| ✅ | T22 | T20 | `PgFrontierStore` / `PgVisitedStore` | [02](./02-pg-persistence.md) T22 | b158e4e |
+| ✅ | T23 | T22 | `persistPage` writers | [02](./02-pg-persistence.md) T23 | 6cddfd7 |
+| ✅ | T24 | T20 | Live progress writer | [02](./02-pg-persistence.md) T24 | 9b54f80 |
+| ✅ | T25 | T23 | Consumer query / reporting API | [02](./02-pg-persistence.md) T25 | 3b04d1b |
+| ✅ | T26 | T23 T25 | Incremental re-crawl (validators, 304 path) | [02](./02-pg-persistence.md) T26 | 86bc35e |
+| ✅ | T27 | T22 T23 T25 | PG integration tests | [02](./02-pg-persistence.md) T27 | 4394330 |
 
 The harness runs first even though the source doc's build order starts at the schema: the
 schema's Done when is a test, and there is nothing to run one with until T21 lands.
@@ -85,8 +85,8 @@ Branch: `sprint-04-steve`
 
 | Status | ID | Deps | Task | Source | Commit |
 |--------|----|------|------|--------|--------|
-| ✅ | T28 | — | `./steve` scaffold + payload/result types | [03](./03-job-mode.md) T28 | — |
-| ✅ | T29 | T20 T22 T23 T28 | `createCrawlJobHandler` factory | [03](./03-job-mode.md) T29 | — |
+| ✅ | T28 | — | `./steve` scaffold + payload/result types | [03](./03-job-mode.md) T28 | 735b4f6 |
+| ✅ | T29 | T20 T22 T23 T28 | `createCrawlJobHandler` factory | [03](./03-job-mode.md) T29 | d54b61b |
 | ⬜ | T32 | T29 | AbortSignal wiring | [03](./03-job-mode.md) T32 | — |
 | ⬜ | T30 | T25 T29 | Failure semantics + crash-resume on retry | [03](./03-job-mode.md) T30 | — |
 | ⬜ | T31 | T28 | Enqueue + status helpers | [03](./03-job-mode.md) T31 | — |
