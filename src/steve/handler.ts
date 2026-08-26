@@ -139,6 +139,51 @@ export interface CreateCrawlJobHandlerOptions {
  * is left `failed` with `stopped_by = 'abort'`, which is exactly the state the retry
  * resumes from: every page already written to PG stays there.
  *
+ * ### Every worker on the prefix claims these jobs
+ *
+ * steve claims by `status` and `run_at`, never by type. Any `Jobs` instance started on the
+ * same `tablePrefix` will claim a crawl job, and a worker with no handler for the type falls
+ * back to steve's noop handler: it completes the job with `{ noop: true }` and the crawl
+ * never runs. Nothing throws and nothing is logged — the job reads `completed` and
+ * `__crawler_crawl` has no row to show for it. Pick one:
+ *
+ * - **a dedicated `tablePrefix`** for the crawl queue (recommended), with only crawl-capable
+ *   workers started on it;
+ * - or register this handler in **every** worker that calls `jobs.start()` on the shared
+ *   prefix, including the ones that "only send email":
+ *   `jobs.setHandler(CRAWL_JOB_TYPE, createCrawlJobHandler({ db }))`.
+ *
+ * Two deployments with different `baseOptions` on one prefix need distinct job types
+ * (`startCrawlJob(…, { type })` and a matching `jobHandlers` key), or each will run the
+ * other's crawls with the wrong code-side configuration.
+ *
+ * ### steve's reaper expires healthy crawls after 5 minutes
+ *
+ * `autoCleanup` is opt-in, but once on, its `maxAllowedRunDurationMinutes` defaults to **5**
+ * — and a crawl running longer than five minutes is the normal case, not the pathology the
+ * reaper is looking for. It flips such a job to `expired`, which is terminal: steve never
+ * retries it, while this handler goes on crawling in the background, oblivious, and
+ * eventually flips the row back to `completed`.
+ *
+ * The window is measured from `started_at`, which steve `COALESCE`s across retries — it is
+ * the *first* attempt's start, so it spans every later attempt and every backoff sleep
+ * between them. Size it for the whole retry story rather than for one crawl:
+ *
+ * ```txt
+ * maxAllowedRunDurationMinutes >= max_attempts * ceil(maxDuration / 60_000) + 15
+ * ```
+ *
+ * where the 15 minutes are slack for exponential backoff. The alternative is to leave
+ * `autoCleanup` off and call `jobs.cleanup(N)` yourself with a crawl-aware `N`.
+ *
+ * A crawl whose job was expired anyway is not lost — the run is in PG, so re-enqueue against
+ * it (there is no `resumeCrawlJob()` helper; this two-step is the whole recovery path):
+ *
+ * ```ts
+ * const crawl = await crawlerPg.getCrawlByJobUid(expiredJobUid);
+ * if (crawl) await startCrawlJob(jobs, crawl.seeds, options, { crawlUid: crawl.uid });
+ * ```
+ *
  * The returned handler is safe to invoke concurrently: everything but the once-per-handler
  * warning flags is created per job.
  */

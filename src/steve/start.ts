@@ -63,8 +63,36 @@ export interface StartCrawlJobOptions extends JobCreateOptions {
  *
  * A finished job's `result` is a `CrawlJobResult` — counters and a `crawlUid`, never pages
  * and never bodies. Those live in the crawler's own tables, and so does the crawl history:
- * steve rows are queue plumbing, and `jobs.fetchAll()` only lists the last 30 minutes of
- * them by default.
+ * steve rows are queue plumbing. `jobs.fetchAll()` only lists jobs created in the last 30
+ * minutes unless you pass `{ sinceMinutesAgo }`, so a crawl older than that is simply absent
+ * from the queue's view of the world; `crawlerPg.listCrawls()` is the history that keeps.
+ *
+ * ### Before you enqueue: two ways job mode fails silently
+ *
+ * Both are properties of the `Jobs` instance, which is why they are the caller's to get
+ * right — the crawler never sees its configuration. In full on
+ * {@linkcode createCrawlJobHandler}; in short:
+ *
+ * 1. **The reaper.** If the instance runs with `autoCleanup`, its default
+ *    `maxAllowedRunDurationMinutes` of 5 will expire a perfectly healthy crawl, and
+ *    `expired` is terminal — no retry. The window is measured from the *first* attempt's
+ *    `started_at`, so it must cover them all:
+ *    `maxAllowedRunDurationMinutes >= max_attempts * ceil(maxDuration / 60_000) + 15`.
+ * 2. **Claiming ignores the job type.** Every worker started on the same `tablePrefix` will
+ *    claim these jobs, and one without the crawl handler registered noop-completes them: the
+ *    job reads `completed` and the crawl never ran. Give the crawl queue its own prefix, or
+ *    register the handler in every worker on the shared one.
+ *
+ * Recovering an expired job is a re-enqueue against the run it left behind in PG:
+ *
+ * ```ts
+ * const crawl = await crawlerPg.getCrawlByJobUid(expiredJobUid);
+ * if (crawl) await startCrawlJob(jobs, crawl.seeds, options, { crawlUid: crawl.uid });
+ * ```
+ *
+ * The `crawlUid` is what makes it a resume rather than a re-crawl: the frontier, the visited
+ * set and every page already fetched are still there, and the new job picks the run up where
+ * the expired one was interrupted.
  *
  * @param jobs A live, caller-owned `Jobs` instance — steve is a type-only dependency here.
  * @param seeds Where the crawl starts. A single URL or a non-empty list of them.
