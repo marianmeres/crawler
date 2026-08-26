@@ -53,7 +53,7 @@ Verify: deno task test
 | ✅ | T16 | — | Budgets and `stoppedBy` semantics | [01](./01-engine-completion.md) T16 | — |
 | ✅ | T17 | — | Trap detection | [01](./01-engine-completion.md) T17 | — |
 | ✅ | T18 | — | `parseSitemap` + robots `Sitemap:` seeding | [01](./01-engine-completion.md) T18 | — |
-| ⬜ | T39 | — | Mask userinfo credentials in every message | [01](./01-engine-completion.md) T39 | — |
+| ✅ | T39 | — | Mask userinfo credentials in every message | [01](./01-engine-completion.md) T39 | — |
 
 No database, no new submodule, no external package: this whole sprint runs against the fake
 transport from task 13. Three of the five tasks wire options that are already declared,

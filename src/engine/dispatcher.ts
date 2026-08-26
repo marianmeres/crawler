@@ -56,6 +56,7 @@ import type {
 	SkipReason,
 	StoppedBy,
 } from "../types.ts";
+import { maskUserinfo } from "../url/_mask-userinfo.ts";
 import { classifyLink } from "../url/same-site.ts";
 import { normalizeUrl } from "../url/normalize-url.ts";
 import { Channel } from "./channel.ts";
@@ -256,7 +257,9 @@ export class CrawlEngine {
 		for (const raw of Array.isArray(urls) ? urls : [urls]) {
 			const url = this.#normalizeEntryUrl(raw);
 			if (url === null) {
-				this.#opts.logger?.warn(`[crawl] add(): not a usable URL: ${raw}`);
+				this.#opts.logger?.warn(
+					`[crawl] add(): not a usable URL: ${maskUserinfo(raw)}`,
+				);
 				continue;
 			}
 			this.#manual.push({ url, depth, via: "manual", meta: init?.meta });
@@ -352,7 +355,9 @@ export class CrawlEngine {
 		for (const seed of list) {
 			const url = this.#normalizeEntryUrl(seed);
 			if (url === null) {
-				this.#opts.logger?.warn(`[crawl] seed is not a usable URL: ${seed}`);
+				this.#opts.logger?.warn(
+					`[crawl] seed is not a usable URL: ${maskUserinfo(seed)}`,
+				);
 				continue;
 			}
 			normalized.push(url);
@@ -665,7 +670,10 @@ export class CrawlEngine {
 		try {
 			await this.#fetchOne(item);
 		} catch (e) {
-			this.#opts.logger?.error(`[crawl] worker failed on ${item.url}:`, e);
+			this.#opts.logger?.error(
+				`[crawl] worker failed on ${maskUserinfo(item.url)}:`,
+				e,
+			);
 		} finally {
 			state.inFlight--;
 			this.#globalInFlight--;
@@ -1032,9 +1040,9 @@ export class CrawlEngine {
 			if (!this.#warnedRegionFallback) {
 				this.#warnedRegionFallback = true;
 				this.#opts.logger?.warn(
-					`[crawl] followRegions is set but ${from} has no landmark markup — ` +
-						`region filtering does not apply to such pages (warned once ` +
-						`per crawl)`,
+					`[crawl] followRegions is set but ${maskUserinfo(from)} has no ` +
+						`landmark markup — region filtering does not apply to such ` +
+						`pages (warned once per crawl)`,
 				);
 			}
 		}
@@ -1279,8 +1287,8 @@ export class CrawlEngine {
 
 			if (originOf(url) !== origin) {
 				this.#opts.logger?.warn(
-					`[crawl] ${origin}/robots.txt names the cross-origin sitemap ${url} — ` +
-						`ignored`,
+					`[crawl] ${origin}/robots.txt names the cross-origin sitemap ` +
+						`${maskUserinfo(url)} — ignored`,
 				);
 				continue;
 			}
@@ -1338,13 +1346,17 @@ export class CrawlEngine {
 			});
 			if (!res.ok || !res.hasBody) {
 				this.#opts.logger?.warn(
-					`[crawl] sitemap ${url} answered ${res.status} — ignored`,
+					`[crawl] sitemap ${maskUserinfo(url)} answered ` +
+						`${res.status} — ignored`,
 				);
 				return undefined;
 			}
 			return parseSitemap(await decodeSitemapBody(await res.bytes()));
 		} catch (e) {
-			this.#opts.logger?.warn(`[crawl] sitemap ${url} could not be read:`, e);
+			this.#opts.logger?.warn(
+				`[crawl] sitemap ${maskUserinfo(url)} could not be read:`,
+				e,
+			);
 			return undefined;
 		}
 	}
@@ -1364,13 +1376,17 @@ export class CrawlEngine {
 		});
 		if (!verdict.follow) {
 			this.#stats.recordSkip(verdict.reason);
-			this.#opts.logger?.warn(`[crawl] seed rejected (${verdict.reason}): ${url}`);
+			this.#opts.logger?.warn(
+				`[crawl] seed rejected (${verdict.reason}): ${maskUserinfo(url)}`,
+			);
 			return;
 		}
 
 		if (!await this.#robots!.isAllowed(url)) {
 			this.#stats.recordSkip("robots-disallow");
-			this.#opts.logger?.warn(`[crawl] seed rejected (robots-disallow): ${url}`);
+			this.#opts.logger?.warn(
+				`[crawl] seed rejected (robots-disallow): ${maskUserinfo(url)}`,
+			);
 			return;
 		}
 

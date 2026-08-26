@@ -29,6 +29,7 @@ import {
 	robotsDisallowAll,
 } from "../extract/robots-txt.ts";
 import type { RobotsTxt } from "../extract/robots-txt.ts";
+import { maskUserinfo } from "../url/_mask-userinfo.ts";
 
 /** Content types that mean "this is a fallback page, not a robots.txt". */
 const HTML_CONTENT_TYPES: ReadonlySet<string> = new Set([
@@ -134,8 +135,8 @@ export function createRobotsGate(opts: RobotsGateOptions): RobotsGate {
 
 			if (res.status >= 500) {
 				opts.logger?.warn(
-					`[crawl] ${url} answered ${res.status} — treating the whole origin ` +
-						`as disallowed`,
+					`[crawl] ${maskUserinfo(url)} answered ${res.status} — ` +
+						`treating the whole origin as disallowed`,
 				);
 				return robotsDisallowAll();
 			}
@@ -150,7 +151,10 @@ export function createRobotsGate(opts: RobotsGateOptions): RobotsGate {
 				text.length > opts.maxBytes ? text.slice(0, opts.maxBytes) : text,
 			);
 		} catch (e) {
-			opts.logger?.debug(`[crawl] ${url} could not be fetched, allowing all:`, e);
+			opts.logger?.debug(
+				`[crawl] ${maskUserinfo(url)} could not be fetched, allowing all:`,
+				e,
+			);
 			return robotsAllowAll();
 		}
 	}

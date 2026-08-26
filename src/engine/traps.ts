@@ -27,6 +27,7 @@
  */
 
 import type { Logger, TrapOptions } from "../types.ts";
+import { maskUserinfo } from "../url/_mask-userinfo.ts";
 
 /** The stateful half — one per run. See {@linkcode createTrapTracker}. */
 export interface TrapTracker {
@@ -143,8 +144,9 @@ export function createTrapTracker(
 				softDup.add(contentHash);
 				logger?.warn(
 					`[crawl] ${n} pages share one body (hash ${contentHash}, e.g. ` +
-						`${sampleUrl ?? "?"}) — treating it as a soft-404 farm: pages ` +
-						`with this body are no longer expanded`,
+						`${sampleUrl === undefined ? "?" : maskUserinfo(sampleUrl)}) — ` +
+						`treating it as a soft-404 farm: pages with this body are no ` +
+						`longer expanded`,
 				);
 			}
 			return true;
