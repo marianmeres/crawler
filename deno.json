@@ -6,7 +6,8 @@
 		"./url": "./src/url/mod.ts",
 		"./extract": "./src/extract/mod.ts",
 		"./stores": "./src/stores/mod.ts",
-		"./pg": "./src/pg/mod.ts"
+		"./pg": "./src/pg/mod.ts",
+		"./steve": "./src/steve/mod.ts"
 	},
 	"publish": {
 		"exclude": [
@@ -34,9 +35,11 @@
 		"@marianmeres/crawler/extract": "./src/extract/mod.ts",
 		"@marianmeres/crawler/stores": "./src/stores/mod.ts",
 		"@marianmeres/crawler/pg": "./src/pg/mod.ts",
+		"@marianmeres/crawler/steve": "./src/steve/mod.ts",
 		"@marianmeres/page-fetcher": "jsr:@marianmeres/page-fetcher@^0.4.0",
 		"@marianmeres/page-fetcher/adapters": "jsr:@marianmeres/page-fetcher@^0.4.0/adapters",
 		"@marianmeres/npmbuild": "jsr:@marianmeres/npmbuild@^1.16.0",
+		"@marianmeres/steve": "jsr:@marianmeres/steve@^3.0.0",
 		"pg": "npm:pg@^8.21.0",
 		"@types/pg": "npm:@types/pg@^8.20.0",
 		"@std/assert": "jsr:@std/assert@^1.0.19",

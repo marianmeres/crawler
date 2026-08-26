@@ -4,6 +4,7 @@ import * as url from "../src/url/mod.ts";
 import * as extract from "../src/extract/mod.ts";
 import * as stores from "../src/stores/mod.ts";
 import * as pg from "../src/pg/mod.ts";
+import * as steve from "../src/steve/mod.ts";
 
 /**
  * The published runtime surface, pinned. Types are checked by `deno check`; what this
@@ -87,6 +88,14 @@ Deno.test("pg/mod.ts — exports exactly the documented runtime surface", () => 
 	assertEquals(runtimeExportsOf(pg), [...PG_EXPORTS].sort());
 });
 
+const STEVE_EXPORTS = [
+	"CRAWL_JOB_TYPE",
+];
+
+Deno.test("steve/mod.ts — exports exactly the documented runtime surface", () => {
+	assertEquals(runtimeExportsOf(steve), [...STEVE_EXPORTS].sort());
+});
+
 /**
  * The rest of the suite imports by relative path, which is convenient and proves
  * nothing about packaging. This one resolves through the *published* specifiers — the
@@ -96,12 +105,13 @@ Deno.test("pg/mod.ts — exports exactly the documented runtime surface", () => 
  * `./extract` an assertion instead of a sentence in a README.
  */
 Deno.test("the published subpaths resolve, and to the same modules", async () => {
-	const [pkgRoot, pkgUrl, pkgExtract, pkgStores, pkgPg] = await Promise.all([
+	const [pkgRoot, pkgUrl, pkgExtract, pkgStores, pkgPg, pkgSteve] = await Promise.all([
 		import("@marianmeres/crawler"),
 		import("@marianmeres/crawler/url"),
 		import("@marianmeres/crawler/extract"),
 		import("@marianmeres/crawler/stores"),
 		import("@marianmeres/crawler/pg"),
+		import("@marianmeres/crawler/steve"),
 	]);
 
 	assertEquals(runtimeExportsOf(pkgRoot), [...ROOT_EXPORTS].sort());
@@ -109,12 +119,14 @@ Deno.test("the published subpaths resolve, and to the same modules", async () =>
 	assertEquals(runtimeExportsOf(pkgExtract), [...EXTRACT_EXPORTS].sort());
 	assertEquals(runtimeExportsOf(pkgStores), [...STORES_EXPORTS].sort());
 	assertEquals(runtimeExportsOf(pkgPg), [...PG_EXPORTS].sort());
+	assertEquals(runtimeExportsOf(pkgSteve), [...STEVE_EXPORTS].sort());
 
 	// the same module instance, not a second copy of the graph
 	assertEquals(pkgUrl.normalizeUrl, url.normalizeUrl);
 	assertEquals(pkgExtract.extractLinks, extract.extractLinks);
 	assertEquals(pkgStores.createMemoryFrontier, stores.createMemoryFrontier);
 	assertEquals(pkgPg.CrawlerPg, pg.CrawlerPg);
+	assertEquals(pkgSteve.CRAWL_JOB_TYPE, steve.CRAWL_JOB_TYPE);
 
 	// and they actually work when reached that way
 	assertEquals(
