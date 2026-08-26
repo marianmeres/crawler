@@ -50,7 +50,7 @@ Verify: deno task test
 | Status | ID | Deps | Task | Source | Commit |
 |--------|----|------|------|--------|--------|
 | ✅ | T15 | — | Events, `safeEmit`, throttled progress | [01](./01-engine-completion.md) T15 | — |
-| ⬜ | T16 | — | Budgets and `stoppedBy` semantics | [01](./01-engine-completion.md) T16 | — |
+| ✅ | T16 | — | Budgets and `stoppedBy` semantics | [01](./01-engine-completion.md) T16 | — |
 | ⬜ | T17 | — | Trap detection | [01](./01-engine-completion.md) T17 | — |
 | ⬜ | T18 | — | `parseSitemap` + robots `Sitemap:` seeding | [01](./01-engine-completion.md) T18 | — |
 | ⬜ | T39 | — | Mask userinfo credentials in every message | [01](./01-engine-completion.md) T39 | — |

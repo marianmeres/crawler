@@ -92,8 +92,13 @@ interface HostState {
 	nextReadyAt: number;
 }
 
-/** The outcome of trying to put one URL into the frontier. */
-type EnqueueOutcome = "pushed" | "duplicate" | "queue-full";
+/**
+ * The outcome of trying to put one URL into the frontier. Every failure member is also a
+ * {@linkcode SkipReason}, so a caller records the outcome as-is.
+ */
+type EnqueueOutcome =
+	| "pushed"
+	| Extract<SkipReason, "duplicate" | "queue-full" | "max-pages">;
 
 /** A URL the consumer handed us through {@linkcode CrawlEngine.add}. */
 interface ManualAdd {
@@ -154,6 +159,8 @@ export class CrawlEngine {
 	#report: CrawlReport | undefined;
 	/** Armed at `run()` only when there is an `onProgress` handler to feed. */
 	#progressTimer: ReturnType<typeof setInterval> | undefined;
+	/** Armed at `run()` only when `maxDuration` is finite — the whole of that budget. */
+	#deadlineTimer: ReturnType<typeof setTimeout> | undefined;
 
 	// --- collected output ---
 	readonly #pages: PageResult[] = [];
@@ -347,6 +354,7 @@ export class CrawlEngine {
 				options: this.#opts,
 			}));
 		this.#armProgress();
+		this.#armDeadline();
 
 		for (const url of normalized) await this.#enqueueSeed(url);
 
@@ -420,6 +428,7 @@ export class CrawlEngine {
 	#finalize(): Promise<void> {
 		this.#finalizePromise ??= (async () => {
 			this.#disarmProgress();
+			this.#disarmDeadline();
 			await this.#disposeFetcher();
 			this.#report = {
 				crawlId: this.crawlId,
@@ -479,6 +488,57 @@ export class CrawlEngine {
 	}
 
 	// -------------------------------------------------------------------------------
+	// budgets
+	// -------------------------------------------------------------------------------
+
+	/**
+	 * The `maxDuration` budget: one timer, armed here and cleared at finalization.
+	 *
+	 * It takes the same graceful path as the other two — in-flight pages drain and are
+	 * still delivered, so a crawl can (and routinely does) outlive its deadline by one
+	 * slow response. Per-request hard limits are page-fetcher's `deadline`, not this.
+	 */
+	#armDeadline(): void {
+		if (!Number.isFinite(this.#opts.maxDuration)) return;
+		this.#deadlineTimer = setTimeout(
+			() => void this.#shutdown("maxDuration", undefined, false),
+			this.#opts.maxDuration,
+		);
+	}
+
+	#disarmDeadline(): void {
+		if (this.#deadlineTimer === undefined) return;
+		clearTimeout(this.#deadlineTimer);
+		this.#deadlineTimer = undefined;
+	}
+
+	/**
+	 * The one place `maxPages` and `maxTotalBytes` are enforced. Called after every
+	 * completion, because both count completions.
+	 *
+	 * Precedence is entirely {@linkcode CrawlEngine.#shutdown}'s: the first stop to latch
+	 * wins, so an already-latched `stop()` keeps its `stoppedBy` and only `abort`
+	 * overrides. The early return is the same rule, said locally.
+	 */
+	#checkBudgets(): void {
+		if (this.#stoppedBy !== undefined) return;
+		if (this.#pageCapReached()) {
+			void this.#shutdown("maxPages", undefined, false);
+		} else if (this.#stats.bytes >= this.#opts.maxTotalBytes) {
+			void this.#shutdown("maxTotalBytes", undefined, false);
+		}
+	}
+
+	/**
+	 * Has `maxPages` been spent? Completions only — a page in flight has not been paid
+	 * for yet, which is why the cap can be reached mid-fetch and still deliver more
+	 * pages than it names.
+	 */
+	#pageCapReached(): boolean {
+		return this.#stats.done + this.#stats.failed >= this.#opts.maxPages;
+	}
+
+	// -------------------------------------------------------------------------------
 	// dispatcher
 	// -------------------------------------------------------------------------------
 
@@ -499,6 +559,13 @@ export class CrawlEngine {
 			});
 
 			if (item !== undefined) {
+				// a budget (or `stop()`) can latch while this pop is in flight, and
+				// "dispatch stops" has to mean it: hand the claim back rather than
+				// start a fetch nobody asked for any more
+				if (!this.#dispatching) {
+					await this.#frontier.release(item.url);
+					break;
+				}
 				this.#queued = Math.max(0, this.#queued - 1);
 				this.#dispatchItem(item);
 				continue;
@@ -769,6 +836,7 @@ export class CrawlEngine {
 			host: item.host,
 			size: result.size,
 		});
+		this.#checkBudgets();
 
 		// a failed page is announced twice on purpose: `onPageError` for the observer
 		// that only cares about failures, `onPageDone` for the one that persists every
@@ -1057,7 +1125,7 @@ export class CrawlEngine {
 			referrer: page.from,
 		});
 		if (outcome === "pushed") record.followed = true;
-		else record.skipReason = outcome === "duplicate" ? "duplicate" : "queue-full";
+		else record.skipReason = outcome;
 		return record;
 	}
 
@@ -1100,11 +1168,7 @@ export class CrawlEngine {
 			discoveredVia: "manual",
 			meta: entry.meta,
 		});
-		return outcome === "pushed"
-			? undefined
-			: outcome === "duplicate"
-			? "duplicate"
-			: "queue-full";
+		return outcome === "pushed" ? undefined : outcome;
 	}
 
 	/**
@@ -1138,9 +1202,7 @@ export class CrawlEngine {
 		}
 
 		const outcome = await this.#enqueue({ url, depth: 0, discoveredVia: "seed" });
-		if (outcome !== "pushed") {
-			this.#stats.recordSkip(outcome === "duplicate" ? "duplicate" : "queue-full");
-		}
+		if (outcome !== "pushed") this.#stats.recordSkip(outcome);
 	}
 
 	async #enqueue(input: {
@@ -1150,6 +1212,10 @@ export class CrawlEngine {
 		referrer?: string;
 		meta?: Record<string, unknown>;
 	}): Promise<EnqueueOutcome> {
+		// the page budget is run state, not a property of this URL: past the cap nothing
+		// new becomes work, while whatever is already queued stays queued — visible as
+		// `stats.queued`, never rewritten into skips
+		if (this.#pageCapReached()) return "max-pages";
 		if (this.#queued >= this.#opts.maxQueued) return "queue-full";
 
 		const item: FrontierItem = {
