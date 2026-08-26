@@ -13,7 +13,7 @@
 		"exclude": [
 			".*",
 			"tests/**",
-			"examples/**",
+			"example/**",
 			"docs/**",
 			"scripts/**",
 			"tmp/**"
@@ -22,6 +22,11 @@
 	"tasks": {
 		"test": "deno test -A --env-file",
 		"test:watch": "deno test -A --env-file --watch",
+		"example": "deno run -A --env-file example/server.ts",
+		"example:version": "deno run -A scripts/gen-example-version.ts",
+		"example:theme": "deno run -A scripts/gen-example-theme.ts",
+		"example:build": "deno task example:version && deno run -A jsr:@marianmeres/deno-build --root example/src --entry main.ts --outdir example/dist --strict --minify",
+		"example:dev": "deno task example:version && deno run -A jsr:@marianmeres/deno-build --root example/src --entry main.ts --outdir example/dist --watch --watch-dir example/src",
 		"npm:build": "deno run -A scripts/build-npm.ts",
 		"npm:publish": "deno run -A scripts/build-npm.ts && cd ./.npm-dist && npm publish --access=public",
 		"release": "deno run -A jsr:@marianmeres/release",
@@ -39,6 +44,9 @@
 		"@marianmeres/page-fetcher": "jsr:@marianmeres/page-fetcher@^0.4.0",
 		"@marianmeres/page-fetcher/adapters": "jsr:@marianmeres/page-fetcher@^0.4.0/adapters",
 		"@marianmeres/npmbuild": "jsr:@marianmeres/npmbuild@^1.16.0",
+		"@marianmeres/vanilla": "jsr:@marianmeres/vanilla@^1.8.0",
+		"@marianmeres/design-tokens/reboot": "jsr:@marianmeres/design-tokens@^1.17.0/reboot",
+		"@marianmeres/design-tokens/themes": "jsr:@marianmeres/design-tokens@^1.17.0/themes",
 		"@marianmeres/steve": "jsr:@marianmeres/steve@^3.0.0",
 		"pg": "npm:pg@^8.21.0",
 		"@types/pg": "npm:@types/pg@^8.20.0",
@@ -46,11 +54,19 @@
 		"@std/fs": "jsr:@std/fs@^1.0.24",
 		"@std/path": "jsr:@std/path@^1.1.6"
 	},
+	"exclude": [
+		"example/dist"
+	],
 	"fmt": {
 		"useTabs": true,
 		"lineWidth": 90,
 		"indentWidth": 4,
 		"proseWrap": "preserve",
-		"exclude": ["tests/fixtures/"]
+		"exclude": [
+			"tests/fixtures/",
+			"example/dist",
+			"example/theme.css",
+			"example/reboot.css"
+		]
 	}
 }

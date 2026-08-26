@@ -2,7 +2,7 @@
  * Scraping: crawl a site and turn every page into a record of your own shape.
  *
  * ```sh
- * deno run -A --env-file examples/scraper.ts https://example.com
+ * deno run -A --env-file example/recipes/scraper.ts https://example.com
  * ```
  *
  * @module
@@ -62,7 +62,7 @@ function text(fragment: string): string {
 if (import.meta.main) {
 	const seed = Deno.args[0];
 	if (!seed) {
-		console.error("usage: deno run -A examples/scraper.ts <url>");
+		console.error("usage: deno run -A example/recipes/scraper.ts <url>");
 		Deno.exit(1);
 	}
 

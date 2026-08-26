@@ -3,7 +3,7 @@
  *
  * ```sh
  * DATABASE_URL=postgres://localhost/mydb \
- *     deno run -A --env-file examples/incremental-recrawl-pg.ts https://example.com
+ *     deno run -A --env-file example/recipes/incremental-recrawl-pg.ts https://example.com
  * ```
  *
  * The second run is the point. With `recrawl: true` the engine re-queues URLs the archive
@@ -66,7 +66,7 @@ if (import.meta.main) {
 	if (!seed || !connectionString) {
 		console.error(
 			"usage: DATABASE_URL=postgres://… deno run -A " +
-				"examples/incremental-recrawl-pg.ts <url>",
+				"example/recipes/incremental-recrawl-pg.ts <url>",
 		);
 		Deno.exit(1);
 	}

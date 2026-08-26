@@ -18,8 +18,8 @@ import { assert, assertEquals, assertStringIncludes } from "@std/assert";
 import { crawl } from "../src/crawler.ts";
 import type { PageResult } from "../src/types.ts";
 import { type MiniSite, SITE, siteFetch, SMALL_SITE } from "./_helpers.ts";
-import { brokenLinkReport } from "../examples/broken-links.ts";
-import { type SitemapPageData, sitemapXml } from "../examples/sitemap-gen.ts";
+import { brokenLinkReport } from "../example/recipes/broken-links.ts";
+import { type SitemapPageData, sitemapXml } from "../example/recipes/sitemap-gen.ts";
 
 const HOME = `${SITE}/`;
 

@@ -3,7 +3,7 @@
  *
  * ```sh
  * DATABASE_URL=postgres://localhost/mydb \
- *     deno run -A --env-file examples/steve-job.ts https://example.com
+ *     deno run -A --env-file example/recipes/steve-job.ts https://example.com
  * ```
  *
  * steve gives the crawl a durable queue entry, retry-with-backoff and a status check;
@@ -34,7 +34,7 @@ if (import.meta.main) {
 	const connectionString = Deno.env.get("DATABASE_URL");
 	if (!seed || !connectionString) {
 		console.error(
-			"usage: DATABASE_URL=postgres://… deno run -A examples/steve-job.ts <url>",
+			"usage: DATABASE_URL=postgres://… deno run -A example/recipes/steve-job.ts <url>",
 		);
 		Deno.exit(1);
 	}

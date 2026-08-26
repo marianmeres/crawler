@@ -1,0 +1,640 @@
+/// <reference no-default-lib="true" />
+/// <reference lib="dom" />
+/// <reference lib="dom.iterable" />
+/// <reference lib="esnext" />
+/**
+ * Example app for `@marianmeres/crawler`.
+ *
+ * Seeds and budgets go up, and what comes back is a live view of one crawl: the counters
+ * from `CrawlStats`, the pages as they land, and the link graph with the reason every
+ * skipped edge was skipped.
+ *
+ * The crawl itself runs in `example/server.ts` — a browser cannot run one (CORS, no
+ * robots.txt, and a crawl outlives the page that started it). So this file is pure UI. It
+ * posts the options, then polls, and the crucial detail is *what* it polls: not the
+ * runner, but the crawler's own PostgreSQL tables. That is why the `direct` and `queued`
+ * runners share every line of the rendering below, and why job mode can show live
+ * progress at all — steve writes a job's `result` exactly once, at the end.
+ *
+ * Built with `@marianmeres/vanilla`: explicit reactive state (`observable`), markup in
+ * `<template>`s (`fromTemplate` / `refs`), one delegated listener tree (`delegate`).
+ *
+ * This is browser code: the triple-slash lib references above type it against the DOM
+ * (the repo's `deno.json` targets the Deno runtime for the library itself).
+ *
+ * Bundle with: `deno task example:build` (→ `example/dist/bundle.js`).
+ */
+import {
+	createView,
+	delegate,
+	fromTemplate,
+	observable,
+	refs,
+} from "@marianmeres/vanilla";
+import { VERSION } from "./version.generated.ts";
+
+/* ---- config --------------------------------------------------------------- */
+
+/** Must match the literal in the anti-FOUC inline script in index.html. */
+const THEME_KEY = "crawler-example-theme";
+
+/** How often to ask the server how it is going. */
+const POLL_MS = 800;
+
+/**
+ * Rows kept in the DOM per table. The counters report the real totals; this only bounds
+ * what is painted, because a 300-page crawl can produce tens of thousands of edges.
+ */
+const RENDER_CAP = 500;
+
+const MODE_HINT: Record<string, string> = {
+	direct:
+		"The server owns the crawl: createCrawler() streams pages, the ./pg handle persists each one. Dies with the process.",
+	queued:
+		"One crawl = one @marianmeres/steve job, run by an in-process worker. Durable and retried — and it waits its turn.",
+};
+
+/* ---- the wire ------------------------------------------------------------- */
+
+type Mode = "direct" | "queue";
+
+interface PageRow {
+	url: string;
+	finalUrl: string | null;
+	depth: number;
+	status: number | null;
+	ok: boolean;
+	notModified: boolean;
+	contentType: string | null;
+	title: string | null;
+	size: number | null;
+	timing: Record<string, number>;
+	errorKind: string | null;
+	errorMessage: string | null;
+	skipReason: string | null;
+}
+
+interface LinkRow {
+	fromUrl: string;
+	toUrl: string;
+	kind: "internal" | "external";
+	rel: string;
+	nofollow: boolean;
+	followed: boolean;
+	skipReason: string | null;
+}
+
+interface Stats {
+	done?: number;
+	failed?: number;
+	skipped?: number;
+	queued?: number;
+	inFlight?: number;
+	bytes?: number;
+	elapsed?: number;
+	pagesPerSecond?: number;
+	eta?: number;
+}
+
+interface Snapshot {
+	mode: Mode;
+	uid: string;
+	job: { status: string; attempts: number; error: string | null } | null;
+	crawl: null | {
+		uid: string;
+		seeds: string[];
+		status: string;
+		stats: Stats;
+		options: Record<string, unknown>;
+		stoppedBy: string | null;
+		error: string | null;
+		startedAt: string | null;
+		endedAt: string | null;
+	};
+	pages: PageRow[];
+	links: LinkRow[];
+	terminal: boolean;
+	more: boolean;
+	stoppable: boolean;
+	error?: string;
+}
+
+interface RecentRow {
+	uid: string;
+	jobUid: string | null;
+	seeds: string[];
+	status: string;
+	stoppedBy: string | null;
+	stats: Stats;
+	createdAt: string;
+}
+
+/* ---- state ---------------------------------------------------------------- */
+
+/** Bumped on every start/attach; a poll belonging to an older run just stops. */
+let session = 0;
+
+const recent = observable<RecentRow[]>([]);
+
+/* ---- theme (page-level, class-based: matches the design-tokens `.dark`) ----
+ * The class is set pre-paint by the inline script in index.html; this keeps it
+ * and the browser chrome color (<meta name="theme-color">) in sync afterwards. */
+
+const prefersDark = (): boolean =>
+	globalThis.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false;
+
+const applyTheme = (dark: boolean): void => {
+	const root = document.documentElement;
+	root.classList.toggle("dark", dark);
+	const bg = getComputedStyle(root).getPropertyValue("--stuic-color-background").trim();
+	if (bg) {
+		document.querySelector('meta[name="theme-color"]')?.setAttribute("content", bg);
+	}
+};
+
+let isDark = (() => {
+	const stored = localStorage.getItem(THEME_KEY);
+	return stored ? stored === "dark" : prefersDark();
+})();
+applyTheme(isDark);
+
+/* ---- utils ---------------------------------------------------------------- */
+
+const nf = new Intl.NumberFormat();
+
+const bytes = (n: number): string =>
+	n < 1024
+		? `${n} B`
+		: n < 1024 * 1024
+		? `${(n / 1024).toFixed(1)} KB`
+		: `${(n / 1024 / 1024).toFixed(2)} MB`;
+
+const secs = (ms: number): string => {
+	const s = Math.round(ms / 1000);
+	return s < 60
+		? `${s}s`
+		: `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, "0")}s`;
+};
+
+/** `https://a.com/b/c?d` → `/b/c?d`, so the column reads as a site map rather than noise. */
+const short = (url: string): string => {
+	try {
+		const u = new URL(url);
+		return (u.pathname + u.search) || "/";
+	} catch {
+		return url;
+	}
+};
+
+const host = (url: string): string => {
+	try {
+		return new URL(url).host;
+	} catch {
+		return "";
+	}
+};
+
+/** Prepend `rows` (which arrive oldest-first) and trim the tail back to the cap. */
+function prepend(body: HTMLElement, nodes: HTMLElement[]): void {
+	if (!nodes.length) return;
+	const frag = document.createDocumentFragment();
+	// newest at the top: the arrival order is what a live feed wants reversed
+	for (let i = nodes.length - 1; i >= 0; i--) frag.appendChild(nodes[i]);
+	body.prepend(frag);
+	while (body.childElementCount > RENDER_CAP) body.lastElementChild!.remove();
+}
+
+/* ---- view ----------------------------------------------------------------- */
+
+const app = createView((track) => {
+	const el = fromTemplate("tpl-app");
+	const r = refs(el);
+
+	const form = r.form as HTMLFormElement;
+	const startBtn = r.startBtn as HTMLButtonElement;
+	const stopBtn = r.stopBtn as HTMLButtonElement;
+
+	/** What is on screen right now, so Stop and the broken report know their target. */
+	let current: { mode: Mode; uid: string } | null = null;
+	let cursors = { pages: 0, links: 0 };
+	let totals = { pages: 0, links: 0 };
+	let brokenLoaded = false;
+	let timer: ReturnType<typeof setTimeout> | undefined;
+
+	/* -- the form -- */
+
+	const val = (name: string): string => (r[name] as HTMLInputElement).value.trim();
+	const int = (name: string, fallback: number): number => {
+		const n = Number(val(name));
+		return Number.isFinite(n) ? n : fallback;
+	};
+	const on = (name: string): boolean => (r[name] as HTMLInputElement).checked;
+
+	const readForm = () => ({
+		seeds: (r.seeds as HTMLTextAreaElement).value
+			.split(/[\s,]+/)
+			.map((s) => s.trim())
+			.filter(Boolean),
+		mode: (r.modeQueue as HTMLInputElement).checked ? "queue" : "direct",
+		maxDepth: int("maxDepth", 2),
+		maxPages: int("maxPages", 50),
+		maxDuration: int("maxDuration", 120) * 1000,
+		concurrency: int("concurrency", 4),
+		perHostDelay: int("perHostDelay", 250),
+		subdomains: (r.subdomains as HTMLSelectElement).value,
+		allowExternal: on("allowExternal"),
+		checkExternal: on("checkExternal"),
+		assets: on("assets"),
+		sitemaps: on("sitemaps"),
+		respectRobots: on("respectRobots"),
+		persistBody: on("persistBody"),
+	});
+
+	const setDefaults = (): void => {
+		(r.seeds as HTMLTextAreaElement).value = "https://emde.meres.sk";
+		(r.maxDepth as HTMLInputElement).value = "2";
+		(r.maxPages as HTMLInputElement).value = "50";
+		(r.maxDuration as HTMLInputElement).value = "120";
+		(r.concurrency as HTMLInputElement).value = "4";
+		(r.perHostDelay as HTMLInputElement).value = "250";
+	};
+
+	const syncModeHint = (): void => {
+		const queued = (r.modeQueue as HTMLInputElement).checked;
+		r.modeHint.textContent = MODE_HINT[queued ? "queued" : "direct"];
+	};
+
+	/* -- rendering -- */
+
+	const setBadge = (node: HTMLElement, text: string, kind = ""): void => {
+		node.hidden = false;
+		node.textContent = text;
+		node.className = `badge${kind ? ` badge-${kind}` : ""}`;
+	};
+
+	const statusKind = (status: string): string =>
+		status === "completed"
+			? "ok"
+			: status === "running"
+			? "run"
+			: status === "failed" || status === "expired"
+			? "bad"
+			: status === "stopped"
+			? "warn"
+			: "";
+
+	const reset = (): void => {
+		cursors = { pages: 0, links: 0 };
+		totals = { pages: 0, links: 0 };
+		brokenLoaded = false;
+		r.pagesBody.replaceChildren();
+		r.linksBody.replaceChildren();
+		r.brokenBody.replaceChildren();
+		r.cPages.textContent = "0";
+		r.cLinks.textContent = "0";
+		r.cBroken.textContent = "—";
+		r.pagesNote.textContent = "";
+		r.linksNote.textContent = "";
+		r.pagesEmpty.hidden = false;
+		r.linksEmpty.hidden = false;
+		r.brokenEmpty.hidden = false;
+		r.jobBadge.hidden = true;
+		r.stoppedBadge.hidden = true;
+		r.errorBox.hidden = true;
+		r.notes.hidden = true;
+		r.elapsed.textContent = "";
+		for (const k of ["tDone", "tFailed", "tSkipped", "tQueued", "tFlight"]) {
+			r[k].textContent = "0";
+		}
+		r.tBytes.textContent = "0 B";
+		r.tRate.textContent = "0";
+		r.tEta.textContent = "—";
+		(r.barFill as HTMLElement).style.width = "0%";
+		r.bar.classList.remove("indeterminate", "is-done", "is-halted");
+	};
+
+	const renderStats = (snap: Snapshot): void => {
+		const s = snap.crawl?.stats ?? {};
+		r.tDone.textContent = nf.format(s.done ?? 0);
+		r.tFailed.textContent = nf.format(s.failed ?? 0);
+		r.tSkipped.textContent = nf.format(s.skipped ?? 0);
+		r.tQueued.textContent = nf.format(s.queued ?? 0);
+		r.tFlight.textContent = nf.format(s.inFlight ?? 0);
+		r.tBytes.textContent = bytes(s.bytes ?? 0);
+		r.tRate.textContent = (s.pagesPerSecond ?? 0).toFixed(1);
+		r.tEta.textContent = s.eta == null || snap.terminal ? "—" : secs(s.eta);
+		r.elapsed.textContent = s.elapsed ? secs(s.elapsed) : "";
+
+		// the budget is the honest denominator — it is the number the crawl will stop at.
+		// A crawl that ran out of site rather than out of budget is 100% done at 24/40,
+		// so `completed` fills the bar; anything else keeps the ratio it really reached.
+		const budget = Number(snap.crawl?.options?.maxPages ?? 0);
+		const fetched = (s.done ?? 0) + (s.failed ?? 0);
+		const finished = snap.terminal && snap.crawl?.stoppedBy === "completed";
+		const bar = r.bar as HTMLElement;
+		const fill = r.barFill as HTMLElement;
+		if (finished) {
+			bar.classList.remove("indeterminate");
+			fill.style.width = "100%";
+		} else if (budget > 0) {
+			bar.classList.remove("indeterminate");
+			fill.style.width = `${Math.min(100, (fetched / budget) * 100).toFixed(1)}%`;
+		} else {
+			bar.classList.toggle("indeterminate", !snap.terminal);
+		}
+		bar.classList.toggle("is-done", finished);
+		bar.classList.toggle("is-halted", snap.terminal && !finished);
+	};
+
+	const renderPages = (rows: PageRow[]): void => {
+		if (!rows.length) return;
+		r.pagesEmpty.hidden = true;
+		const nodes = rows.map((p) => {
+			const node = fromTemplate("tpl-page-row");
+			const q = refs(node);
+			const code = p.notModified ? 304 : p.status;
+			q.status.textContent = code == null ? (p.errorKind ?? "error") : String(code);
+			q.status.classList.add(`st-${code == null ? "x" : String(code)[0]}`);
+			q.depth.textContent = String(p.depth);
+			q.url.textContent = short(p.finalUrl ?? p.url);
+			q.title.textContent = p.errorMessage ??
+				(p.skipReason ? `skipped: ${p.skipReason}` : (p.title ?? ""));
+			q.type.textContent = (p.contentType ?? "").split(";")[0];
+			q.size.textContent = p.size == null ? "—" : bytes(p.size);
+			q.ms.textContent = p.timing?.total == null
+				? "—"
+				: nf.format(Math.round(p.timing.total));
+			return node;
+		});
+		prepend(r.pagesBody, nodes);
+		totals.pages += rows.length;
+		r.cPages.textContent = nf.format(totals.pages);
+		r.pagesNote.textContent = totals.pages > RENDER_CAP
+			? `newest ${RENDER_CAP} of ${nf.format(totals.pages)}`
+			: "";
+	};
+
+	const renderLinks = (rows: LinkRow[]): void => {
+		if (!rows.length) return;
+		r.linksEmpty.hidden = true;
+		const nodes = rows.map((l) => {
+			const node = fromTemplate("tpl-link-row");
+			const q = refs(node);
+			node.classList.add(l.followed ? "is-followed" : "is-skipped");
+			q.to.textContent = l.kind === "external" ? l.toUrl : short(l.toUrl);
+			q.from.textContent = `from ${short(l.fromUrl)}`;
+			q.kind.textContent = l.kind === "external"
+				? host(l.toUrl) || "external"
+				: "internal";
+			q.rel.textContent = l.nofollow ? `${l.rel} · nofollow` : l.rel;
+			q.followed.textContent = l.followed ? "yes" : "no";
+			// the SkipReason is the interesting half: it names the policy that declined
+			q.why.textContent = l.followed ? "" : (l.skipReason ?? "—");
+			return node;
+		});
+		prepend(r.linksBody, nodes);
+		totals.links += rows.length;
+		r.cLinks.textContent = nf.format(totals.links);
+		r.linksNote.textContent = totals.links > RENDER_CAP
+			? `newest ${RENDER_CAP} of ${nf.format(totals.links)}`
+			: "";
+	};
+
+	const renderBroken = (
+		rows: {
+			toUrl: string;
+			status: number | null;
+			errorKind?: string;
+			fromUrls: string[];
+		}[],
+	): void => {
+		r.cBroken.textContent = nf.format(rows.length);
+		if (!rows.length) return;
+		r.brokenEmpty.hidden = true;
+		const frag = document.createDocumentFragment();
+		for (const b of rows) {
+			const node = fromTemplate("tpl-broken-row");
+			const q = refs(node);
+			q.url.textContent = b.toUrl;
+			q.from.textContent = b.fromUrls.slice(0, 3).map(short).join(", ") +
+				(b.fromUrls.length > 3 ? ` +${b.fromUrls.length - 3} more` : "");
+			q.status.textContent = b.status == null
+				? (b.errorKind ?? "error")
+				: String(b.status);
+			q.status.classList.add(`st-${b.status == null ? "x" : String(b.status)[0]}`);
+			q.count.textContent = String(b.fromUrls.length);
+			frag.appendChild(node);
+		}
+		r.brokenBody.replaceChildren(frag);
+	};
+
+	const renderRecent = (rows: RecentRow[]): void => {
+		r.recentEmpty.hidden = rows.length > 0;
+		const frag = document.createDocumentFragment();
+		for (const c of rows) {
+			const node = fromTemplate("tpl-recent-row");
+			const q = refs(node);
+			const btn = node.querySelector("button") as HTMLButtonElement;
+			// a run with a job uid was queued, and queue mode is polled BY that job uid
+			btn.dataset.mode = c.jobUid ? "queue" : "direct";
+			btn.dataset.uid = c.jobUid ?? c.uid;
+			q.seed.textContent = c.seeds[0] ?? "(no seed)";
+			q.meta.textContent = [
+				c.stoppedBy ?? c.status,
+				`${c.stats?.done ?? 0} pages`,
+				new Date(c.createdAt).toLocaleTimeString(),
+			].join(" · ");
+			frag.appendChild(node);
+		}
+		r.recent.replaceChildren(frag);
+	};
+
+	/* -- polling -- */
+
+	const showFailure = (message: string): void => {
+		r.errorBox.hidden = false;
+		r.errorBox.textContent = message;
+	};
+
+	const finish = (): void => {
+		startBtn.disabled = false;
+		stopBtn.disabled = true;
+		void loadRecent();
+	};
+
+	const poll = async (mine: number): Promise<void> => {
+		if (mine !== session || !current) return;
+		const { mode, uid } = current;
+		let snap: Snapshot;
+		try {
+			const res = await fetch(
+				`/api/crawl/${mode}/${uid}?pages=${cursors.pages}&links=${cursors.links}`,
+			);
+			snap = await res.json() as Snapshot;
+			if (!res.ok) throw new Error(snap.error ?? `HTTP ${res.status}`);
+		} catch (e) {
+			if (mine !== session) return;
+			showFailure(`Polling stopped: ${e}`);
+			finish();
+			return;
+		}
+		if (mine !== session) return;
+
+		cursors.pages += snap.pages.length;
+		cursors.links += snap.links.length;
+
+		if (snap.job) {
+			setBadge(r.jobBadge, `job: ${snap.job.status}`, statusKind(snap.job.status));
+		}
+		const status = snap.crawl?.status ?? (snap.job ? "queued" : "pending");
+		setBadge(r.statusBadge, status, statusKind(status));
+		if (snap.crawl?.stoppedBy) {
+			setBadge(
+				r.stoppedBadge,
+				`stoppedBy: ${snap.crawl.stoppedBy}`,
+				snap.crawl.stoppedBy === "completed" ? "ok" : "warn",
+			);
+		}
+		const failure = snap.crawl?.error ?? snap.job?.error;
+		if (failure) showFailure(failure);
+
+		renderStats(snap);
+		renderPages(snap.pages);
+		renderLinks(snap.links);
+		stopBtn.disabled = !snap.stoppable;
+
+		// a crawl that just ended can still have rows this poll did not reach
+		if (!snap.terminal || snap.more) {
+			timer = setTimeout(() => void poll(mine), snap.more ? 0 : POLL_MS);
+			return;
+		}
+
+		if (!brokenLoaded) {
+			brokenLoaded = true;
+			await fetch(`/api/crawl/${mode}/${uid}/broken`)
+				.then((res) => res.json())
+				.then((data) => {
+					if (mine === session) renderBroken(data.broken ?? []);
+				})
+				.catch(() => {});
+		}
+		finish();
+	};
+
+	const watch = (mode: Mode, uid: string): void => {
+		clearTimeout(timer);
+		session++;
+		current = { mode, uid };
+		reset();
+		startBtn.disabled = true;
+		stopBtn.disabled = false;
+		void poll(session);
+	};
+
+	/* -- actions -- */
+
+	const loadRecent = async (): Promise<void> => {
+		await fetch("/api/crawls")
+			.then((res) => res.json())
+			.then((data) => recent.set(data.crawls ?? []))
+			.catch(() => {});
+	};
+
+	const start = async (): Promise<void> => {
+		const body = readForm();
+		if (!body.seeds.length) {
+			showFailure("Give me at least one seed URL.");
+			return;
+		}
+		startBtn.disabled = true;
+		r.errorBox.hidden = true;
+		try {
+			const res = await fetch("/api/crawl", {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(body),
+			});
+			const data = await res.json() as {
+				mode: Mode;
+				uid: string;
+				notes?: string[];
+				error?: string;
+			};
+			if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+			watch(data.mode, data.uid);
+			if (data.notes?.length) {
+				r.notes.hidden = false;
+				r.notes.innerHTML = "<b>The server clamped your request:</b>";
+				const ul = document.createElement("ul");
+				for (const n of data.notes) {
+					const li = document.createElement("li");
+					li.textContent = n;
+					ul.appendChild(li);
+				}
+				r.notes.appendChild(ul);
+			}
+		} catch (e) {
+			showFailure(String(e instanceof Error ? e.message : e));
+			startBtn.disabled = false;
+		}
+	};
+
+	const stop = async (): Promise<void> => {
+		if (!current) return;
+		stopBtn.disabled = true;
+		await fetch(`/api/crawl/${current.mode}/${current.uid}/stop`, { method: "POST" })
+			.catch(() => {});
+	};
+
+	const selectTab = (name: string): void => {
+		for (const btn of (r.tabs as HTMLElement).querySelectorAll("button")) {
+			btn.setAttribute("aria-selected", String(btn.dataset.tab === name));
+		}
+		r.panePages.hidden = name !== "pages";
+		r.paneLinks.hidden = name !== "links";
+		r.paneBroken.hidden = name !== "broken";
+	};
+
+	/* -- wiring -- */
+
+	track(recent.subscribe(renderRecent));
+
+	// One delegated listener tree for the whole view (events bubble to `el`).
+	track(delegate(el, {
+		submit: (e) => {
+			e.preventDefault();
+			void start();
+		},
+		stop: () => void stop(),
+		toggleTheme: () => {
+			isDark = !isDark;
+			applyTheme(isDark);
+			localStorage.setItem(THEME_KEY, isDark ? "dark" : "light");
+		},
+		tab: (_e, target) => selectTab(target.dataset.tab!),
+		filterLinks: () => {
+			const v = (r.linkFilter as HTMLSelectElement).value;
+			r.linksBody.className = v ? `only-${v}` : "";
+		},
+		openRun: (_e, target) => watch(target.dataset.mode as Mode, target.dataset.uid!),
+	}));
+
+	// the radios are not `[data-on]` targets (there is nothing to delegate to), so the
+	// hint is kept in sync with a plain listener
+	const modeChanged = () => syncModeHint();
+	for (const node of [r.modeDirect, r.modeQueue]) {
+		node.addEventListener("change", modeChanged);
+		track(() => node.removeEventListener("change", modeChanged));
+	}
+
+	form.setAttribute("novalidate", "");
+	setDefaults();
+	syncModeHint();
+	reset();
+	r.version.textContent = `· v${VERSION}`;
+	void loadRecent();
+
+	return { el };
+});
+
+document.getElementById("app")!.appendChild(app.el!);

@@ -13,7 +13,10 @@ Website crawler: frontier, scope, politeness, link graph, budgets. Transport is
 - **Build**: `deno task npm:build` → `.npm-dist/` (runs `tsc`, stricter than
   `deno check`).
 - **Format/lint**: `deno fmt` / `deno lint`. Tabs, `lineWidth: 90`, `indentWidth: 4`.
-- **Check**: `deno check src/**/*.ts tests/**/*.ts examples/*.ts`.
+- **Check**: `deno check src/**/*.ts tests/**/*.ts example/recipes/*.ts example/server.ts
+  example/src/main.ts`.
+- **Example app**: `deno task example` (needs `EXAMPLE_PG_*`), `deno task example:build`
+  after touching `example/src/`. See `example/README.md`.
 
 ## Project Structure
 
@@ -31,9 +34,13 @@ src/engine/         — internals: dispatcher, channel, scope, robots-gate, trap
                       private-host
 tests/              — one file per concern; `_helpers.ts` (fake fetcher + mini-site),
                       `_pg.ts` (TEST_PG_* pool), `_fixtures.ts`
-examples/           — 6 runnable recipes; import BY PACKAGE NAME, never from `src/`
+example/            — the interactive app: server.ts (HTTP API + both runners),
+                      index.html (+ templates/styles), src/main.ts (vanilla UI),
+                      dist/bundle.js (committed), theme.css (generated), reboot.css
+example/recipes/    — 6 runnable recipes; import BY PACKAGE NAME, never from `src/`
 docs/plan/          — the original spec (authoritative); docs/ship-v1/ — the v1 tracker
 scripts/build-npm.ts — entry points, real dependency list, optional peers
+scripts/gen-example-{version,theme}.ts — generated example assets; run by example:build
 ```
 
 ## Critical Conventions
@@ -157,6 +164,8 @@ There is **no `resumeCrawlJob()` helper** in v1. Recovery is the two-step
 - **Close every pool in a `finally`.** Deno's leak detection fails a test that leaves
   pool sockets open.
 - **Never crawl the network in a test.** Use `siteFetch(SITE)` from `tests/_helpers.ts`.
+  The example app is the one place that _does_ hit the real network — it is not a test,
+  and `EXAMPLE_PG_*` points it at a database of its own.
 
 ## Before Making Changes
 
@@ -166,6 +175,8 @@ There is **no `resumeCrawlJob()` helper** in v1. Recovery is the two-step
 - [ ] `deno task test`, `deno fmt`, `deno lint`.
 - [ ] Changing `deno.json` `exports`? Update `src/{name}.ts` shims **and**
       `scripts/build-npm.ts` `entryPoints` — drift between the three is how this rots.
+- [ ] Touched `example/src/`? Run `deno task example:build` — `example/dist/bundle.js` is
+      committed, and a stale bundle is a demo that silently shows the old behavior.
 
 ## Releasing
 
@@ -179,12 +190,12 @@ is irreversible and outward-facing, so it is a human's, never an agent's.
    the only proof the PG and steve suites actually executed, since they skip silently.
    The second must be green too: without a database this package is still expected to
    pass, just with fewer tests.
-3. **`deno fmt --check src tests examples scripts` and `deno lint` clean.** Scope fmt to
+3. **`deno fmt --check src tests example scripts` and `deno lint` clean.** Scope fmt to
    those four dirs: a bare `deno fmt --check` also walks `docs/`, whose hand-aligned plan
    tables it would rewrite, and `docs/plan/` is the frozen spec.
 4. **`deno publish --dry-run`.** The file list must be `src/**` plus `LICENSE`,
    `README.md`, `AGENTS.md`, `deno.json`, `deno.lock` — nothing else. Anything from
-   `tests/`, `examples/`, `scripts/`, `docs/` or `tmp/` means `publish.exclude` broke.
+   `tests/`, `example/`, `scripts/`, `docs/` or `tmp/` means `publish.exclude` broke.
 5. **`deno task npm:build`**, then read `.npm-dist/package.json`: six `exports` keys,
    `dependencies` = `@marianmeres/page-fetcher` + `@marianmeres/clog` (clog is a
    type-only import here, but the emitted `.d.ts` references it, so a consumer's `tsc`

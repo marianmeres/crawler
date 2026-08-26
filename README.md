@@ -287,7 +287,7 @@ makes the whole thing work: those are the bytes `extractLinks` sees (so JS-injec
 links are discovered and followed), the bytes `contentHash` is computed over, and the
 bytes `./pg`'s `persistBody` archives.
 
-See [`examples/spa-browser.ts`](./examples/spa-browser.ts) for the runnable version.
+See [`example/recipes/spa-browser.ts`](./example/recipes/spa-browser.ts) for the runnable version.
 
 ## Persistence: PostgreSQL (`./pg`)
 
@@ -577,17 +577,32 @@ Full API documentation, generated from the source:
 
 ## Examples
 
-Runnable recipes in [`examples/`](./examples), each
-`deno run -A --env-file examples/<name>.ts <url>`:
+### The interactive one
 
-| Example                                                             | Shows                                       |
-| ------------------------------------------------------------------- | ------------------------------------------- |
-| [`broken-links.ts`](./examples/broken-links.ts)                     | dead targets + the pages linking to them    |
-| [`sitemap-gen.ts`](./examples/sitemap-gen.ts)                       | a `sitemap.xml` from a crawl                |
-| [`scraper.ts`](./examples/scraper.ts)                               | `onPage` as the crawler/scraper boundary    |
-| [`incremental-recrawl-pg.ts`](./examples/incremental-recrawl-pg.ts) | crawl, re-crawl, diff — on PostgreSQL       |
-| [`spa-browser.ts`](./examples/spa-browser.ts)                       | HTTP + browser adapters, routed per request |
-| [`steve-job.ts`](./examples/steve-job.ts)                           | enqueue, run a worker, watch it live        |
+```bash
+createdb example_crawler   # then fill EXAMPLE_PG_* in .env — see .env.example
+deno task example          # → http://127.0.0.1:8000
+```
+
+A control panel for one crawl: paste seed URLs, set the budgets, pick whether the crawl
+runs in-process or as a `./steve` job, and watch it happen — live counters, the pages as
+they land, and the link graph with the reason every skipped edge was skipped. Both
+runners are polled the same way, out of the crawler's own tables, which is exactly how
+you would watch a crawl from another process. See [`example/`](./example).
+
+### The recipes
+
+Runnable single-file recipes in [`example/recipes/`](./example/recipes), each
+`deno run -A --env-file example/recipes/<name>.ts <url>`:
+
+| Example                                                                    | Shows                                       |
+| -------------------------------------------------------------------------- | ------------------------------------------- |
+| [`broken-links.ts`](./example/recipes/broken-links.ts)                     | dead targets + the pages linking to them    |
+| [`sitemap-gen.ts`](./example/recipes/sitemap-gen.ts)                       | a `sitemap.xml` from a crawl                |
+| [`scraper.ts`](./example/recipes/scraper.ts)                               | `onPage` as the crawler/scraper boundary    |
+| [`incremental-recrawl-pg.ts`](./example/recipes/incremental-recrawl-pg.ts) | crawl, re-crawl, diff — on PostgreSQL       |
+| [`spa-browser.ts`](./example/recipes/spa-browser.ts)                       | HTTP + browser adapters, routed per request |
+| [`steve-job.ts`](./example/recipes/steve-job.ts)                           | enqueue, run a worker, watch it live        |
 
 ## License
 

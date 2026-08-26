@@ -2,7 +2,7 @@
  * Broken-link report: every dead target of a crawl, with the pages linking to it.
  *
  * ```sh
- * deno run -A --env-file examples/broken-links.ts https://example.com
+ * deno run -A --env-file example/recipes/broken-links.ts https://example.com
  * ```
  *
  * @module
@@ -61,7 +61,7 @@ export function brokenLinkReport(
 if (import.meta.main) {
 	const seed = Deno.args[0];
 	if (!seed) {
-		console.error("usage: deno run -A examples/broken-links.ts <url>");
+		console.error("usage: deno run -A example/recipes/broken-links.ts <url>");
 		Deno.exit(1);
 	}
 

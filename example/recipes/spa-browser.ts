@@ -3,7 +3,7 @@
  * browser where it is not.
  *
  * ```sh
- * deno run -A --env-file examples/spa-browser.ts https://example.com
+ * deno run -A --env-file example/recipes/spa-browser.ts https://example.com
  * ```
  *
  * The browser adapter hands back `page.content()` **after** the wait strategy resolved —
@@ -43,7 +43,7 @@ async function loadPlaywright(): Promise<PlaywrightSource | undefined> {
 if (import.meta.main) {
 	const seed = Deno.args[0];
 	if (!seed) {
-		console.error("usage: deno run -A examples/spa-browser.ts <url>");
+		console.error("usage: deno run -A example/recipes/spa-browser.ts <url>");
 		Deno.exit(1);
 	}
 

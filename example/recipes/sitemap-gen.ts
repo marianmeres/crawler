@@ -2,7 +2,7 @@
  * Sitemap generation: crawl a site, print a `sitemap.xml` of what it found.
  *
  * ```sh
- * deno run -A --env-file examples/sitemap-gen.ts https://example.com > sitemap.xml
+ * deno run -A --env-file example/recipes/sitemap-gen.ts https://example.com > sitemap.xml
  * ```
  *
  * @module
@@ -63,7 +63,7 @@ function xml(value: string): string {
 if (import.meta.main) {
 	const seed = Deno.args[0];
 	if (!seed) {
-		console.error("usage: deno run -A examples/sitemap-gen.ts <url>");
+		console.error("usage: deno run -A example/recipes/sitemap-gen.ts <url>");
 		Deno.exit(1);
 	}
 
