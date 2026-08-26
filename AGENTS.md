@@ -166,3 +166,39 @@ There is **no `resumeCrawlJob()` helper** in v1. Recovery is the two-step
 - [ ] `deno task test`, `deno fmt`, `deno lint`.
 - [ ] Changing `deno.json` `exports`? Update `src/{name}.ts` shims **and**
       `scripts/build-npm.ts` `entryPoints` — drift between the three is how this rots.
+
+## Releasing
+
+Ordered, and each step gates the next. Steps 1-5 are repeatable and cost nothing; step 6
+is irreversible and outward-facing, so it is a human's, never an agent's.
+
+1. **Docs pass** per the ecosystem's `PRE_RELEASE_DOCS_UPDATE.md` — README and this file
+   still describing the code that exists, every snippet still type-checking.
+2. **`deno task test` green twice.** Once with `TEST_PG_*` filled in `.env`, once without
+   (`deno test -A`, no `--env-file`). The first run must report **0 ignored** — that is
+   the only proof the PG and steve suites actually executed, since they skip silently.
+   The second must be green too: without a database this package is still expected to
+   pass, just with fewer tests.
+3. **`deno fmt --check src tests examples scripts` and `deno lint` clean.** Scope fmt to
+   those four dirs: a bare `deno fmt --check` also walks `docs/`, whose hand-aligned plan
+   tables it would rewrite, and `docs/plan/` is the frozen spec.
+4. **`deno publish --dry-run`.** The file list must be `src/**` plus `LICENSE`,
+   `README.md`, `AGENTS.md`, `deno.json`, `deno.lock` — nothing else. Anything from
+   `tests/`, `examples/`, `scripts/`, `docs/` or `tmp/` means `publish.exclude` broke.
+5. **`deno task npm:build`**, then read `.npm-dist/package.json`: six `exports` keys,
+   `dependencies` = `@marianmeres/page-fetcher` + `@marianmeres/clog` (clog is a
+   type-only import here, but the emitted `.d.ts` references it, so a consumer's `tsc`
+   must be able to resolve it), `pg` / `@types/pg` / `@marianmeres/steve` as **optional**
+   `peerDependencies`, and `files` = `dist` + LICENSE/README/AGENTS. Then smoke the
+   artifact itself:
+   `node -e "import('./.npm-dist/dist/mod.js').then(m => console.log(Object.keys(m)))"`.
+6. **`deno task rp`** — release + `deno publish` + npm publish. Run it from `master` with
+   a clean tree; the release tool validates both. It bumps **patch**, so 0.1.0 publishes
+   as 0.1.1 — to publish an exact version instead, run
+   `deno run -A jsr:@marianmeres/release <version> -y && deno task publish`. Later minors
+   are `deno task rpm`.
+
+**Deliberately not in v1** — an `mcp.ts` exposing MCP tools per the ecosystem's
+`MCP_AUTHORING_GUIDE.md`. The obvious candidates are the pure functions — `normalizeUrl`,
+`extractLinks`, `parseRobotsTxt` — which need no crawl, no network and no database. Low
+priority: no consumer has asked.
