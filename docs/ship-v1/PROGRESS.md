@@ -44,7 +44,7 @@ the first run:
 ## Sprint 2 — engine completion (events, budgets, traps, sitemaps)
 
 Branch: `sprint-02-engine`
-Options: --budget 45 --task-budget 15 --max-turns 200 --task-timeout 3600 --model claude-opus-5 --effort xhigh
+Options: --max-tasks 20 --budget 45 --task-budget 15 --max-turns 200 --task-timeout 3600 --model claude-opus-5 --effort xhigh
 Verify: deno task test
 
 | Status | ID | Deps | Task | Source | Commit |
