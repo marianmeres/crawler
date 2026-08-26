@@ -167,7 +167,14 @@ export class CrawlEngine {
 
 	/** Resolved by every completion, so the loop can park instead of polling. */
 	#wake: () => void = () => {};
-	#wakePromise: Promise<void> = Promise.resolve();
+	/**
+	 * Armed from the start: a resumed crawl re-pushes seeds the frontier already knows, so
+	 * nothing signals before the first dispatch. An already-resolved promise here would turn
+	 * the concurrency park into a microtask spin that starves the very IO it waits on.
+	 */
+	#wakePromise: Promise<void> = new Promise<void>((resolve) => {
+		this.#wake = resolve;
+	});
 
 	// --- lifecycle ---
 	#started = false;

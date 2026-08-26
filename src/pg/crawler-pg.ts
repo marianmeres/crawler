@@ -418,8 +418,16 @@ export class CrawlerPg {
 	 * to ack it. Safe because one crawl runs in one process at a time — see the caveat on
 	 * the steve handler's run-duration limit. The recovered URLs get re-fetched and
 	 * `persistPage`'s upserts absorb the replay.
+	 *
+	 * @param opts.jobUid Re-points the `job_uid` back-reference at the job that is taking
+	 * the run over. Job mode passes it on every resume: after a reaped job is recovered by
+	 * re-enqueueing with `{ crawlUid }`, the run belongs to the *new* job, and
+	 * {@linkcode CrawlerPg.getCrawlByJobUid} has to agree.
 	 */
-	async openCrawl(uid: string): Promise<CrawlPersistence> {
+	async openCrawl(
+		uid: string,
+		opts?: { jobUid?: string },
+	): Promise<CrawlPersistence> {
 		await this.#initOnce();
 		const { rows } = await this.#query(
 			`SELECT * FROM ${this.#tableNames.tableCrawl}
@@ -429,7 +437,17 @@ export class CrawlerPg {
 		if (!rows.length) {
 			throw new Error(`Crawl '${uid}' not found (tenant '${this.#tenantId}')`);
 		}
-		const row = query._toCrawlRow(rows[0]);
+		let row = query._toCrawlRow(rows[0]);
+		if (opts?.jobUid !== undefined && opts.jobUid !== row.jobUid) {
+			const { rows: adopted } = await this.#query(
+				`UPDATE ${this.#tableNames.tableCrawl}
+					SET job_uid = $2, updated_at = NOW()
+					WHERE id = $1
+					RETURNING *`,
+				[row.id, opts.jobUid],
+			);
+			row = query._toCrawlRow(adopted[0]);
+		}
 		await this.#query(
 			`UPDATE ${this.#tableNames.tableFrontier}
 				SET status = 'pending', claimed_at = NULL
