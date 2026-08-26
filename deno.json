@@ -5,7 +5,8 @@
 		".": "./src/mod.ts",
 		"./url": "./src/url/mod.ts",
 		"./extract": "./src/extract/mod.ts",
-		"./stores": "./src/stores/mod.ts"
+		"./stores": "./src/stores/mod.ts",
+		"./pg": "./src/pg/mod.ts"
 	},
 	"publish": {
 		"exclude": [
@@ -32,6 +33,7 @@
 		"@marianmeres/crawler/url": "./src/url/mod.ts",
 		"@marianmeres/crawler/extract": "./src/extract/mod.ts",
 		"@marianmeres/crawler/stores": "./src/stores/mod.ts",
+		"@marianmeres/crawler/pg": "./src/pg/mod.ts",
 		"@marianmeres/page-fetcher": "jsr:@marianmeres/page-fetcher@^0.4.0",
 		"@marianmeres/page-fetcher/adapters": "jsr:@marianmeres/page-fetcher@^0.4.0/adapters",
 		"@marianmeres/npmbuild": "jsr:@marianmeres/npmbuild@^1.16.0",

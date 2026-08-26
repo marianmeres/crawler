@@ -3,6 +3,7 @@ import * as root from "../src/mod.ts";
 import * as url from "../src/url/mod.ts";
 import * as extract from "../src/extract/mod.ts";
 import * as stores from "../src/stores/mod.ts";
+import * as pg from "../src/pg/mod.ts";
 
 /**
  * The published runtime surface, pinned. Types are checked by `deno check`; what this
@@ -76,6 +77,16 @@ Deno.test("stores/mod.ts — exports exactly the documented runtime surface", ()
 	assertEquals(runtimeExportsOf(stores), [...STORES_EXPORTS].sort());
 });
 
+const PG_EXPORTS = [
+	"CrawlerPg",
+	"createCrawlerPg",
+	"DEFAULT_TENANT_ID",
+];
+
+Deno.test("pg/mod.ts — exports exactly the documented runtime surface", () => {
+	assertEquals(runtimeExportsOf(pg), [...PG_EXPORTS].sort());
+});
+
 /**
  * The rest of the suite imports by relative path, which is convenient and proves
  * nothing about packaging. This one resolves through the *published* specifiers — the
@@ -85,22 +96,25 @@ Deno.test("stores/mod.ts — exports exactly the documented runtime surface", ()
  * `./extract` an assertion instead of a sentence in a README.
  */
 Deno.test("the published subpaths resolve, and to the same modules", async () => {
-	const [pkgRoot, pkgUrl, pkgExtract, pkgStores] = await Promise.all([
+	const [pkgRoot, pkgUrl, pkgExtract, pkgStores, pkgPg] = await Promise.all([
 		import("@marianmeres/crawler"),
 		import("@marianmeres/crawler/url"),
 		import("@marianmeres/crawler/extract"),
 		import("@marianmeres/crawler/stores"),
+		import("@marianmeres/crawler/pg"),
 	]);
 
 	assertEquals(runtimeExportsOf(pkgRoot), [...ROOT_EXPORTS].sort());
 	assertEquals(runtimeExportsOf(pkgUrl), [...URL_EXPORTS].sort());
 	assertEquals(runtimeExportsOf(pkgExtract), [...EXTRACT_EXPORTS].sort());
 	assertEquals(runtimeExportsOf(pkgStores), [...STORES_EXPORTS].sort());
+	assertEquals(runtimeExportsOf(pkgPg), [...PG_EXPORTS].sort());
 
 	// the same module instance, not a second copy of the graph
 	assertEquals(pkgUrl.normalizeUrl, url.normalizeUrl);
 	assertEquals(pkgExtract.extractLinks, extract.extractLinks);
 	assertEquals(pkgStores.createMemoryFrontier, stores.createMemoryFrontier);
+	assertEquals(pkgPg.CrawlerPg, pg.CrawlerPg);
 
 	// and they actually work when reached that way
 	assertEquals(

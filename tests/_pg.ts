@@ -27,12 +27,24 @@ const { PG_HOST, PG_DATABASE, PG_USER, PG_PASSWORD, PG_PORT } = {
 	PG_PORT: Deno.env.get("TEST_PG_PORT") || "5432",
 };
 
-export function createPg() {
-	return new pg.Pool({
+function connection() {
+	return {
 		host: PG_HOST,
 		user: PG_USER,
 		database: PG_DATABASE,
 		password: PG_PASSWORD,
 		port: parseInt(PG_PORT),
-	});
+	};
+}
+
+export function createPg() {
+	return new pg.Pool(connection());
+}
+
+/**
+ * The single-connection half of the `db: pg.Pool | pg.Client` contract. Returned
+ * unconnected — `await client.connect()` before use, `client.end()` in `finally`.
+ */
+export function createPgClient() {
+	return new pg.Client(connection());
 }
