@@ -17,6 +17,8 @@
 
 import type pg from "pg";
 import type { CrawlStats, Logger, StoppedBy } from "../types.ts";
+import type { FrontierStore, VisitedStore } from "../stores/types.ts";
+import { PgFrontierStore, PgVisitedStore } from "./stores.ts";
 import {
 	_initialize,
 	_schemaCreate,
@@ -75,6 +77,11 @@ export interface CrawlPersistence {
 	/** Refreshed by every lifecycle write on this handle. */
 	readonly crawl: CrawlRow;
 	/**
+	 * This crawl's durable frontier and visited set — hand them to `crawl()` as
+	 * `options.stores` and the run survives the process that started it.
+	 */
+	readonly stores: { frontier: FrontierStore; visited: VisitedStore };
+	/**
 	 * `pending` (or a resumed `failed`/`stopped`) → `running`. The first call stamps
 	 * `startedAt`; later ones keep it, so a resumed attempt reports the original start.
 	 */
@@ -88,8 +95,13 @@ export interface CrawlPersistence {
 	}): Promise<void>;
 }
 
-/** What a bound handle needs from its owning {@linkcode CrawlerPg}. */
-interface CrawlerContext {
+/**
+ * What a bound handle — and the stores it hands out — need from their owning
+ * {@linkcode CrawlerPg}.
+ *
+ * @internal
+ */
+export interface CrawlerContext {
 	db: Queryable;
 	tableNames: CrawlerTableNames;
 	tenantId: string;
@@ -101,10 +113,15 @@ interface CrawlerContext {
 class CrawlHandle implements CrawlPersistence {
 	#ctx: CrawlerContext;
 	#row: CrawlRow;
+	readonly stores: { frontier: FrontierStore; visited: VisitedStore };
 
 	constructor(ctx: CrawlerContext, row: CrawlRow) {
 		this.#ctx = ctx;
 		this.#row = row;
+		this.stores = {
+			frontier: new PgFrontierStore(ctx, row.id),
+			visited: new PgVisitedStore(ctx, row.id),
+		};
 	}
 
 	get crawl(): CrawlRow {
@@ -242,7 +259,15 @@ export class CrawlerPg {
 		return new CrawlHandle(this.#ctx, toCrawlRow(rows[0]));
 	}
 
-	/** Binds a handle to an existing crawl row. Throws when there is none. */
+	/**
+	 * Binds a handle to an existing crawl row. Throws when there is none.
+	 *
+	 * This is also the resume path, so it recovers the frontier first: whatever a crashed
+	 * (or reaped) attempt left `in_flight` goes back to `pending`, because nobody is going
+	 * to ack it. Safe because one crawl runs in one process at a time — see the caveat on
+	 * the steve handler's run-duration limit. The recovered URLs get re-fetched and
+	 * `persistPage`'s upserts absorb the replay.
+	 */
 	async openCrawl(uid: string): Promise<CrawlPersistence> {
 		await this.#initOnce();
 		const { rows } = await this.#query(
@@ -253,7 +278,14 @@ export class CrawlerPg {
 		if (!rows.length) {
 			throw new Error(`Crawl '${uid}' not found (tenant '${this.#tenantId}')`);
 		}
-		return new CrawlHandle(this.#ctx, toCrawlRow(rows[0]));
+		const row = toCrawlRow(rows[0]);
+		await this.#query(
+			`UPDATE ${this.#tableNames.tableFrontier}
+				SET status = 'pending', claimed_at = NULL
+				WHERE crawl_id = $1 AND status = 'in_flight'`,
+			[row.id],
+		);
+		return new CrawlHandle(this.#ctx, row);
 	}
 
 	/** Drops and recreates every table. Destroys all data — this is a test convenience. */

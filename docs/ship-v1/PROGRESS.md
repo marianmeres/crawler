@@ -69,7 +69,7 @@ Branch: `sprint-03-pg`
 | ✅ | T21 | — | PG test harness, env and gating | [02](./02-pg-persistence.md) T21 | 99c27c6 |
 | ✅ | T19 | T21 | Schema DDL — the 5 tables | [02](./02-pg-persistence.md) T19 | a92b1c3 |
 | ✅ | T20 | T19 | `createCrawlerPg` factory + lifecycle | [02](./02-pg-persistence.md) T20 | 3b311c0 |
-| ⬜ | T22 | T20 | `PgFrontierStore` / `PgVisitedStore` | [02](./02-pg-persistence.md) T22 | — |
+| ✅ | T22 | T20 | `PgFrontierStore` / `PgVisitedStore` | [02](./02-pg-persistence.md) T22 | — |
 | ⬜ | T23 | T22 | `persistPage` writers | [02](./02-pg-persistence.md) T23 | — |
 | ⬜ | T24 | T20 | Live progress writer | [02](./02-pg-persistence.md) T24 | — |
 | ⬜ | T25 | T23 | Consumer query / reporting API | [02](./02-pg-persistence.md) T25 | — |
