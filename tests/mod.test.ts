@@ -99,6 +99,32 @@ Deno.test("steve/mod.ts — exports exactly the documented runtime surface", () 
 });
 
 /**
+ * The npm build needs a flat `src/{name}.ts` shim per entry point while deno.json's
+ * `exports` points at `src/{name}/mod.ts`. A subpath added without its shim, or without
+ * its `entryPoints` entry, breaks nothing here and nothing at `deno publish` — only the
+ * npm package, after it is published.
+ */
+Deno.test("npm entry points — one shim and one entry point per deno.json export", async () => {
+	const root = new URL("../", import.meta.url);
+	const denoJson = JSON.parse(await Deno.readTextFile(new URL("deno.json", root)));
+	const names = Object.keys(denoJson.exports).map((k) =>
+		k === "." ? "mod" : k.slice(2)
+	);
+
+	const buildScript = await Deno.readTextFile(new URL("scripts/build-npm.ts", root));
+	const declared = [
+		...buildScript.match(/entryPoints: \[([^\]]*)\]/)![1].matchAll(/"([^"]+)"/g),
+	].map((m) => m[1]);
+	assertEquals(declared.toSorted(), names.toSorted());
+
+	for (const name of names.filter((n) => n !== "mod")) {
+		const shim = await import(`../src/${name}.ts`);
+		const submodule = await import(`../src/${name}/mod.ts`);
+		assertEquals(runtimeExportsOf(shim), runtimeExportsOf(submodule));
+	}
+});
+
+/**
  * The rest of the suite imports by relative path, which is convenient and proves
  * nothing about packaging. This one resolves through the *published* specifiers — the
  * `exports` map, reached via the self-referencing `imports` entries in `deno.json` —
