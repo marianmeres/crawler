@@ -43,6 +43,7 @@ import { createMemoryFrontier } from "../stores/memory-frontier.ts";
 import { createMemoryVisited } from "../stores/memory-visited.ts";
 import type { FrontierItem, FrontierStore, VisitedStore } from "../stores/types.ts";
 import type {
+	CrawlEvents,
 	CrawlOptions,
 	CrawlReport,
 	CrawlStats,
@@ -60,7 +61,7 @@ import { createRobotsGate } from "./robots-gate.ts";
 import type { RobotsGate } from "./robots-gate.ts";
 import { evaluateScope, isOnSeedSite } from "./scope.ts";
 import type { ScopeContext } from "./scope.ts";
-import { createStatsCounter } from "./stats.ts";
+import { createStatsCounter, safeEmit } from "./stats.ts";
 import type { StatsCounter } from "./stats.ts";
 
 /** Content types the engine will look for links in. Anything else is fetched, not read. */
@@ -151,6 +152,8 @@ export class CrawlEngine {
 	#shutdownPromise: Promise<void> | undefined;
 	#finalizePromise: Promise<void> | undefined;
 	#report: CrawlReport | undefined;
+	/** Armed at `run()` only when there is an `onProgress` handler to feed. */
+	#progressTimer: ReturnType<typeof setInterval> | undefined;
 
 	// --- collected output ---
 	readonly #pages: PageResult[] = [];
@@ -332,6 +335,19 @@ export class CrawlEngine {
 			(h) => h !== "",
 		);
 
+		// before the first seed is enqueued, so nothing can be observed ahead of it.
+		// `seeds` is what the crawl actually starts from (normalized, unusable ones
+		// already dropped) and `options` the post-defaults snapshot the engine runs —
+		// handed over as a copy, because the list below is still about to be read and a
+		// handler is not allowed to change what gets crawled.
+		this.#emit("onStart", (h) =>
+			h({
+				crawlId: this.crawlId,
+				seeds: [...normalized],
+				options: this.#opts,
+			}));
+		this.#armProgress();
+
 		for (const url of normalized) await this.#enqueueSeed(url);
 
 		// `stop()`, `abort()` or `dispose()` can land while the seeds are still being
@@ -403,6 +419,7 @@ export class CrawlEngine {
 	/** Dispose engine-owned transport and freeze the report. Idempotent. */
 	#finalize(): Promise<void> {
 		this.#finalizePromise ??= (async () => {
+			this.#disarmProgress();
 			await this.#disposeFetcher();
 			this.#report = {
 				crawlId: this.crawlId,
@@ -414,8 +431,51 @@ export class CrawlEngine {
 					? {}
 					: { stoppedReason: this.#stoppedReason }),
 			};
+			// the guaranteed last progress emit: whatever the throttle did or did not
+			// get around to, a consumer's final snapshot is never a stale one
+			this.#emitProgress();
+			this.#emit("onEnd", (h) => h(this.#report!));
 		})();
 		return this.#finalizePromise;
+	}
+
+	// -------------------------------------------------------------------------------
+	// events
+	// -------------------------------------------------------------------------------
+
+	/**
+	 * Fire one event, if anyone is listening. See
+	 * {@linkcode "./stats.ts".safeEmit} for why nothing here can fail a crawl.
+	 */
+	#emit<K extends keyof CrawlEvents>(
+		name: K,
+		call: (handler: NonNullable<CrawlEvents[K]>) => unknown,
+	): void {
+		const handler = this.#opts.events[name];
+		if (handler === undefined) return;
+		safeEmit(
+			name,
+			() => call(handler as NonNullable<CrawlEvents[K]>),
+			this.#opts.logger,
+		);
+	}
+
+	#emitProgress(): void {
+		this.#emit("onProgress", (h) => h(this.stats()));
+	}
+
+	#armProgress(): void {
+		if (this.#opts.events.onProgress === undefined) return;
+		this.#progressTimer = setInterval(
+			() => this.#emitProgress(),
+			this.#opts.progressInterval,
+		);
+	}
+
+	#disarmProgress(): void {
+		if (this.#progressTimer === undefined) return;
+		clearInterval(this.#progressTimer);
+		this.#progressTimer = undefined;
 	}
 
 	// -------------------------------------------------------------------------------
@@ -576,8 +636,14 @@ export class CrawlEngine {
 		const checkOnly = this.#isCheckOnly(item.url);
 		const startedAt = Date.now();
 
+		this.#emit("onPageStart", (h) => h(item));
+
 		let fetchResult: FetchResult | undefined;
 		let error: PageResult["error"] | undefined;
+		// what was actually thrown, kept beside its flattened `PageResult["error"]`
+		// twin: `onPageError` hands the observer the original (stack and all), the
+		// result carries the serializable shape
+		let thrown: unknown;
 
 		try {
 			fetchResult = await this.#fetch!({
@@ -593,10 +659,12 @@ export class CrawlEngine {
 			});
 		} catch (e) {
 			error = toPageError(e);
+			thrown = e;
 		}
 
 		// an abort releases the claim instead of consuming it, so a resumable store can
-		// hand the item out again on the next run
+		// hand the item out again on the next run. It is also the one path where an
+		// `onPageStart` is not followed by an `onPageDone`: the page was never a page.
 		if (error?.kind === "aborted" && this.#aborting) {
 			await this.#frontier.release(item.url);
 			this.#queued++;
@@ -659,6 +727,7 @@ export class CrawlEngine {
 			} catch (e) {
 				// extraction and the hooks it runs produce data; a throw fails the page
 				error = toPageError(e);
+				thrown = e;
 			}
 		}
 
@@ -682,8 +751,10 @@ export class CrawlEngine {
 			try {
 				result.data = await this.#opts.onPage(result, ctx);
 			} catch (e) {
-				const hookError = toPageError(e);
-				result.error ??= hookError;
+				if (result.error === undefined) {
+					result.error = toPageError(e);
+					thrown = e;
+				}
 				result.ok = false;
 			}
 		}
@@ -698,6 +769,14 @@ export class CrawlEngine {
 			host: item.host,
 			size: result.size,
 		});
+
+		// a failed page is announced twice on purpose: `onPageError` for the observer
+		// that only cares about failures, `onPageDone` for the one that persists every
+		// outcome and would otherwise have to subscribe to both
+		if (result.error !== undefined) {
+			this.#emit("onPageError", (h) => h(thrown, item));
+		}
+		this.#emit("onPageDone", (h) => h(result, ctx));
 
 		if (this.#opts.collect.pages) this.#pages.push(result);
 		await this.#channel!.push(result);
@@ -870,6 +949,7 @@ export class CrawlEngine {
 			if (this.#opts.collect.graph) this.#graph.push(record);
 			if (record.followed === false && record.skipReason !== undefined) {
 				this.#stats.recordSkip(record.skipReason);
+				this.#emit("onLinkSkipped", (h) => h(record));
 			}
 			if (this.#opts.onLink !== undefined) this.#opts.onLink(record);
 

@@ -524,10 +524,18 @@ export interface CrawlEvents {
 	onStart?(
 		info: { crawlId: string; seeds: string[]; options: Readonly<CrawlOptions> },
 	): void;
+	/**
+	 * Paired with an `onPageDone` for every page except one: a fetch cut short by
+	 * {@linkcode Crawler.abort} releases its frontier claim instead of producing a
+	 * result, so that page is started and never finished.
+	 */
 	onPageStart?(item: FrontierItem): void;
 	/** `ctx.fetchResult` gives body access — this is what a persistence sink consumes. */
 	onPageDone?(res: PageResult, ctx: PageContext): void;
-	/** Also produces an `onPageDone` whose result carries `error`. */
+	/**
+	 * `err` is the original throwable, not `res.error`'s flattened shape. Always
+	 * followed by an `onPageDone` whose result carries that `error`.
+	 */
 	onPageError?(err: unknown, item: FrontierItem): void;
 	onLinkSkipped?(link: LinkRecord): void;
 	/** Throttled to {@linkcode CrawlOptions.progressInterval}, plus one final emit. */

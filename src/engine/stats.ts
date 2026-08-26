@@ -1,6 +1,7 @@
 /**
- * Internal — the crawl's counters and the {@linkcode "../types.ts".CrawlStats}
- * snapshots built from them.
+ * Internal — the crawl's counters, the {@linkcode "../types.ts".CrawlStats} snapshots
+ * built from them, and {@linkcode safeEmit}, the wrapper every event call site goes
+ * through.
  *
  * Everything here is a plain number or a `Map`, and every snapshot is JSON-serializable
  * by construction (no `Headers`, no functions, no class instances) — the job and
@@ -15,7 +16,34 @@
  * @module
  */
 
-import type { CrawlStats, SkipReason } from "../types.ts";
+import type { CrawlStats, Logger, SkipReason } from "../types.ts";
+
+/**
+ * Run one event handler and swallow whatever it does.
+ *
+ * This is the whole of the hook/event split. **Events observe**: a handler that throws
+ * is caught, logged at `warn` and forgotten, so no observer can change a crawl's
+ * outcome. **Hooks produce data** — `onPage`, `beforeExtract`, `shouldVisit`, `onLink`
+ * and `priority` are deliberately *not* routed through here, because a throw there has
+ * to be visible (it fails the page, or falls back).
+ *
+ * The return value is ignored and an async handler is **not awaited** — the crawl does
+ * not wait for an observer, and an event's ordering guarantee is when it fires, not when
+ * it finishes. A rejected promise is still caught, though: an unhandled rejection takes
+ * the process down, which is precisely what "an event never affects the crawl" forbids.
+ */
+export function safeEmit(name: string, fn: () => unknown, logger?: Logger): void {
+	try {
+		const out = fn();
+		if (out instanceof Promise) out.catch((e) => warn(name, e, logger));
+	} catch (e) {
+		warn(name, e, logger);
+	}
+}
+
+function warn(name: string, e: unknown, logger?: Logger): void {
+	logger?.warn(`[crawl] event handler ${name} threw:`, e);
+}
 
 /**
  * How many hosts a snapshot's `byHost` may name.
