@@ -14,6 +14,9 @@
  * @module
  */
 
+export { createCrawlJobHandler } from "./handler.ts";
+export type { CreateCrawlJobHandlerOptions } from "./handler.ts";
+
 export { CRAWL_JOB_TYPE } from "./types.ts";
 
 export type {

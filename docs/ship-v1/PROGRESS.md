@@ -86,7 +86,7 @@ Branch: `sprint-04-steve`
 | Status | ID | Deps | Task | Source | Commit |
 |--------|----|------|------|--------|--------|
 | ✅ | T28 | — | `./steve` scaffold + payload/result types | [03](./03-job-mode.md) T28 | — |
-| ⬜ | T29 | T20 T22 T23 T28 | `createCrawlJobHandler` factory | [03](./03-job-mode.md) T29 | — |
+| ✅ | T29 | T20 T22 T23 T28 | `createCrawlJobHandler` factory | [03](./03-job-mode.md) T29 | — |
 | ⬜ | T32 | T29 | AbortSignal wiring | [03](./03-job-mode.md) T32 | — |
 | ⬜ | T30 | T25 T29 | Failure semantics + crash-resume on retry | [03](./03-job-mode.md) T30 | — |
 | ⬜ | T31 | T28 | Enqueue + status helpers | [03](./03-job-mode.md) T31 | — |
