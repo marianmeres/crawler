@@ -91,7 +91,7 @@ Branch: `sprint-04-steve`
 | ✅ | T30 | T25 T29 | Failure semantics + crash-resume on retry | [03](./03-job-mode.md) T30 | — |
 | ✅ | T31 | T28 | Enqueue + status helpers | [03](./03-job-mode.md) T31 | — |
 | ✅ | T33 | T29 T31 | Reaper, listing-window and claiming guidance | [03](./03-job-mode.md) T33 | — |
-| ⬜ | T34 | T29 T30 T31 | Steve integration tests + e2e | [03](./03-job-mode.md) T34 | — |
+| ✅ | T34 | T29 T30 T31 | Steve integration tests + e2e | [03](./03-job-mode.md) T34 | — |
 
 Job mode always runs on PG stores, so this sprint cannot start before sprint 3 is merged.
 T33 is documentation, and it is documentation on purpose: both failures it prevents — a
