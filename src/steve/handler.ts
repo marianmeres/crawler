@@ -96,6 +96,14 @@ export interface CreateCrawlJobHandlerOptions {
  * retries the whole job — which is only safe because the crawl's frontier, visited set and
  * pages live in PG rather than in the attempt that died.
  *
+ * **Cancellation is a hard abort, never a drain.** steve hands the handler an
+ * `AbortSignal` only for a job created with `max_attempt_duration_ms > 0`, and by the time
+ * it fires steve has already recorded the attempt as timed out — so the signal is
+ * forwarded as `CrawlOptions.signal` (in-flight fetches cancelled, no dispatching) and the
+ * attempt then *throws* instead of returning a summary of a truncated run. The crawl row
+ * is left `failed` with `stopped_by = 'abort'`, which is exactly the state the retry
+ * resumes from: every page already written to PG stays there.
+ *
  * The returned handler is safe to invoke concurrently: everything but the once-per-handler
  * warning flags is created per job.
  */
@@ -107,7 +115,11 @@ export function createCrawlJobHandler(opts: CreateCrawlJobHandlerOptions): JobHa
 	let warnedNoBudget = false;
 	let warnedNoPriority = false;
 
-	return async (job: Job): Promise<CrawlJobResult> => {
+	return async (job: Job, signal?: AbortSignal): Promise<CrawlJobResult> => {
+		// an already-fired signal means the attempt timed out before it began: there is
+		// nothing to run, and nothing may be written for it either
+		signal?.throwIfAborted();
+
 		const payload = parsePayload(job.payload, logger);
 		const { persistBody, ...payloadOptions } = payload.options ?? {};
 
@@ -155,7 +167,7 @@ export function createCrawlJobHandler(opts: CreateCrawlJobHandlerOptions): JobHa
 				jobUid: job.uid,
 			});
 
-		return await runCrawl(job, payload, run, merged, opts, resumed);
+		return await runCrawl(job, payload, run, merged, opts, resumed, signal);
 	};
 }
 
@@ -173,9 +185,14 @@ async function runCrawl(
 	merged: CrawlOptions,
 	opts: CreateCrawlJobHandlerOptions,
 	resumed: boolean,
+	signal?: AbortSignal,
 ): Promise<CrawlJobResult> {
 	const writes: Promise<void>[] = [];
 	const consumer: CrawlEvents = merged.events ?? {};
+
+	// steve's signal does not replace a `baseOptions` one — a worker that cancels its own
+	// crawls has as much right to end this run as the attempt timeout does
+	const cancels = [signal, merged.signal].filter((s) => s !== undefined);
 
 	// inside the `try`: the row exists by now, so an option the engine rejects has to end
 	// up marked `failed` like any other fatal error rather than leaving it `pending`
@@ -184,6 +201,7 @@ async function runCrawl(
 	try {
 		crawler = createCrawler({
 			...merged,
+			signal: cancels.length > 1 ? AbortSignal.any(cancels) : cancels[0],
 			stores: run.stores,
 			logger: opts.logger,
 			fetcher: opts.fetcher ?? merged.fetcher,
@@ -210,6 +228,12 @@ async function runCrawl(
 		await Promise.all(writes);
 
 		const report = crawler.report()!;
+
+		// a run the attempt timeout cut short is not a result: steve has already recorded
+		// the timeout, so reporting a summary here would freeze a half-crawl into a
+		// terminal row and the retry would have nothing left to resume
+		if (report.stoppedBy === "abort" && signal?.aborted) signal.throwIfAborted();
+
 		await run.markEnded({
 			status: report.stoppedBy === "completed" ? "completed" : "stopped",
 			stoppedBy: report.stoppedBy,
@@ -225,7 +249,12 @@ async function runCrawl(
 		};
 	} catch (error) {
 		await Promise.allSettled(writes);
-		await run.markEnded({ status: "failed", error: describeError(error) })
+		await run.markEnded({
+			status: "failed",
+			// what ended it, for the human reading the row after the retry
+			...(signal?.aborted ? { stoppedBy: "abort" as const } : {}),
+			error: describeError(error),
+		})
 			.catch((e) =>
 				opts.logger?.warn(`[crawler/steve] marking the crawl failed: ${e}`)
 			);

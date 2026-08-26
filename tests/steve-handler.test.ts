@@ -22,6 +22,7 @@ import {
 } from "@std/assert";
 import type { Job } from "@marianmeres/steve";
 import { createPg } from "./_pg.ts";
+import type { MiniSite } from "./_helpers.ts";
 import { recordingLogger, SITE, siteFetch, SMALL_SITE } from "./_helpers.ts";
 import { createCrawlJobHandler } from "../src/steve/mod.ts";
 import type { CrawlJobResult } from "../src/steve/mod.ts";
@@ -284,6 +285,90 @@ pgTest('a payload asking for "priority" falls back to bfs', async ({ crawlerPg, 
 	// the crawl still ran, and the snapshot records what it actually used
 	assertEquals(result.stats.done, 2);
 	assertEquals((await crawlerPg.getCrawl(result.crawlUid))!.options.strategy, "bfs");
+});
+
+/**
+ * The fixture with every page but the entry point (and the `robots.txt` that precedes it)
+ * made slow, so that "the attempt ended promptly" is a claim with teeth: anything the
+ * engine dispatches after the abort costs five seconds.
+ */
+const SLOW_SITE: MiniSite = Object.fromEntries(
+	Object.entries(SMALL_SITE).map(([url, page]) => [
+		url,
+		url === HOME || url === `${SITE}/robots.txt` ? page : { ...page, delayMs: 5_000 },
+	]),
+);
+
+pgTest("an already-fired signal bails before anything is written", async ({
+	crawlerPg,
+	db,
+}) => {
+	const fetcher = siteFetch(SMALL_SITE);
+	const handler = createCrawlJobHandler({
+		db,
+		pg: { tablePrefix: TEST_PREFIX },
+		fetcher,
+		baseOptions: { maxPages: 10 },
+	});
+
+	// steve times an attempt out before it ever reaches the handler
+	await assertRejects(
+		() =>
+			handler(makeJob({ seeds: [HOME] }), AbortSignal.abort()) as Promise<unknown>,
+	);
+
+	assertEquals(await crawlerPg.listCrawls(), []);
+	assertEquals(fetcher.calls, []);
+});
+
+pgTest("steve's signal aborts the attempt, keeping what PG already has", async ({
+	crawlerPg,
+	db,
+}) => {
+	const fetcher = siteFetch(SLOW_SITE);
+	const controller = new AbortController();
+	let callsAtAbort = 0;
+	let abortedAt = 0;
+
+	const handler = createCrawlJobHandler({
+		db,
+		pg: { tablePrefix: TEST_PREFIX, progressThrottleMs: 0 },
+		fetcher,
+		baseOptions: {
+			concurrency: 1,
+			perHostConcurrency: 1,
+			maxPages: 100,
+			events: {
+				// the first page is done — and, one event wrapper out, already on its way
+				// into PG — which is where steve's attempt timeout lands here
+				onPageDone: () => {
+					if (controller.signal.aborted) return;
+					callsAtAbort = fetcher.calls.length;
+					abortedAt = Date.now();
+					controller.abort();
+				},
+			},
+		},
+	});
+
+	const job = makeJob({ seeds: [HOME] });
+	// the attempt is lost, so it throws rather than reporting a summary of half a crawl
+	await assertRejects(() => handler(job, controller.signal) as Promise<unknown>);
+
+	assert(Date.now() - abortedAt < 3_000, "the abort did not end the attempt promptly");
+	assertEquals(
+		fetcher.calls.length,
+		callsAtAbort,
+		"a page was fetched after the abort",
+	);
+
+	// failed, not stopped: `stopped` is terminal, and this crawl is meant to be resumed
+	const row = (await crawlerPg.getCrawlByJobUid(job.uid))!;
+	assertEquals(row.status, "failed");
+	assertEquals(row.stoppedBy, "abort");
+
+	// nothing was rolled back — the retry starts from these rows, not from the seeds
+	assertEquals((await crawlerPg.listPages(row.uid)).map((p) => p.url), [HOME]);
 });
 
 Deno.test("createCrawlJobHandler refuses to build without a connection", () => {
