@@ -74,7 +74,7 @@ Branch: `sprint-03-pg`
 | ✅ | T24 | T20 | Live progress writer | [02](./02-pg-persistence.md) T24 | — |
 | ✅ | T25 | T23 | Consumer query / reporting API | [02](./02-pg-persistence.md) T25 | — |
 | ✅ | T26 | T23 T25 | Incremental re-crawl (validators, 304 path) | [02](./02-pg-persistence.md) T26 | — |
-| ⬜ | T27 | T22 T23 T25 | PG integration tests | [02](./02-pg-persistence.md) T27 | — |
+| ✅ | T27 | T22 T23 T25 | PG integration tests | [02](./02-pg-persistence.md) T27 | — |
 
 The harness runs first even though the source doc's build order starts at the schema: the
 schema's Done when is a test, and there is nothing to run one with until T21 lands.
