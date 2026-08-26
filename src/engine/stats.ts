@@ -68,8 +68,15 @@ export interface StatsCounter {
 	readonly bytes: number;
 	/** Record one completed fetch. */
 	recordPage(info: { ok: boolean; status: number; host: string; size?: number }): void;
-	/** Record one rejected link. */
-	recordSkip(reason: SkipReason): void;
+	/**
+	 * Record one rejected link.
+	 *
+	 * @param bytes Response bytes to count against `maxTotalBytes` anyway — for the one
+	 * skip that happens *after* a fetch (a redirect landing on an already-crawled
+	 * document). Those bytes crossed the wire whether or not the page was delivered,
+	 * and a budget that ignored them would not be measuring what it claims to.
+	 */
+	recordSkip(reason: SkipReason, bytes?: number): void;
 	/** A full, JSON-serializable snapshot. */
 	snapshot(live: { queued: number; inFlight: number }): CrawlStats;
 }
@@ -132,9 +139,10 @@ export function createStatsCounter(
 			}
 		},
 
-		recordSkip(reason): void {
+		recordSkip(reason, size): void {
 			skipped++;
 			bump(skippedByReason, reason);
+			if (typeof size === "number" && Number.isFinite(size)) bytes += size;
 		},
 
 		snapshot(live): CrawlStats {

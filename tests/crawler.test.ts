@@ -10,6 +10,7 @@ import { crawl, createCrawler } from "../src/crawler.ts";
 import { createMemoryFrontier } from "../src/stores/memory-frontier.ts";
 import { createMemoryVisited } from "../src/stores/memory-visited.ts";
 import type { Crawler, PageResult } from "../src/types.ts";
+import type { MiniSite } from "./_helpers.ts";
 import { SITE, siteFetch, SMALL_SITE } from "./_helpers.ts";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -210,6 +211,96 @@ Deno.test("crawl() — a redirect is an attribute of its item, never an item of 
 	assertEquals(fake.calls.map((c) => c.url), [`${SITE}/redirect`]);
 	assertEquals(await visited.has(`${SITE}/target`), true);
 	assertEquals((await visited.get(`${SITE}/target`))?.status, 200);
+});
+
+Deno.test("crawl() — a redirect target waiting in the frontier is skipped at claim time", async () => {
+	// The pathology a TLS-terminating proxy in front of an origin that does not know it
+	// produces: every `https:` page 301s to its `http:` twin, and the twin's document
+	// then resolves its own relative links against `http:`. So a second spelling of the
+	// entire site reaches the frontier *before* the redirects proving it is the same
+	// site have landed — and the enqueue-time duplicate check, which ran when those
+	// items were pushed, is never re-asked.
+	const TWIN = "twin.test";
+	const site: MiniSite = {
+		[`https://${TWIN}/`]: {
+			html: `<title>Home</title><a href="/a">A</a><a href="/b">B</a>`,
+		},
+		[`https://${TWIN}/a`]: { redirectTo: `http://${TWIN}/a/` },
+		[`https://${TWIN}/b`]: { redirectTo: `http://${TWIN}/b/` },
+		[`http://${TWIN}/a/`]: { html: `<title>A</title><a href="/b/">B</a>` },
+		[`http://${TWIN}/b/`]: { html: `<title>B</title><a href="/a/">A</a>` },
+	};
+	const fake = siteFetch(site);
+	// serial, so the interleaving under test is the only one available: /a completes —
+	// pushing the http twin of /b — strictly before /b is claimed
+	const report = await crawl(`https://${TWIN}/`, {
+		fetcher: fake,
+		robots: { respect: false },
+		concurrency: 1,
+	});
+
+	// three fetches, not four: `http://twin.test/b` was pushed by /a's document and
+	// became visited while it sat in the frontier
+	assertEquals(fake.calls.map((c) => c.url), [
+		`https://${TWIN}/`,
+		`https://${TWIN}/a`,
+		`https://${TWIN}/b`,
+	]);
+	assertEquals(report.pages.map((p) => p.finalUrl), [
+		`https://${TWIN}/`,
+		`http://${TWIN}/a/`,
+		`http://${TWIN}/b/`,
+	]);
+	// one duplicate refused at enqueue (/b's link back to the http twin of /a, already
+	// visited by then) and one at claim time (the http twin of /b)
+	assertEquals(report.stats.skippedByReason.duplicate, 2);
+});
+
+Deno.test("crawl() — two urls whose redirects converge deliver one page, not two", async () => {
+	// What the claim-time gate is structurally too early to catch: both items are
+	// already in flight when the redirects reveal they are one document. Where a
+	// redirect lands is only knowable after the fetch, so completion is the earliest
+	// anything *can* know.
+	const CONV = "converge.test";
+	const site: MiniSite = {
+		[`https://${CONV}/`]: {
+			html: `<title>Home</title><a href="/a">A</a><a href="/b">B</a>`,
+		},
+		[`https://${CONV}/a`]: { redirectTo: `https://${CONV}/target` },
+		// a beat behind, so /a is deterministically the one that gets to deliver
+		[`https://${CONV}/b`]: { redirectTo: `https://${CONV}/target`, delayMs: 20 },
+		[`https://${CONV}/target`]: { html: `<title>Target</title>` },
+	};
+	const visited = createMemoryVisited();
+	const fake = siteFetch(site);
+	const report = await crawl(`https://${CONV}/`, {
+		fetcher: fake,
+		robots: { respect: false },
+		stores: { visited },
+	});
+
+	// both were fetched — nothing could have known sooner
+	assertEquals(fake.calls.map((c) => c.url), [
+		`https://${CONV}/`,
+		`https://${CONV}/a`,
+		`https://${CONV}/b`,
+	]);
+	// but the document is delivered once, under the url that reached it first
+	assertEquals(report.pages.map((p) => p.url), [
+		`https://${CONV}/`,
+		`https://${CONV}/a`,
+	]);
+	assertEquals(report.pages[1].finalUrl, `https://${CONV}/target`);
+	assertEquals(report.stats.done, 2);
+	assertEquals(report.stats.skippedByReason.duplicate, 1);
+
+	// /b is marked visited anyway, so no later referrer goes back for it
+	assertEquals(await visited.has(`https://${CONV}/b`), true);
+
+	// and its bytes still count against the budget: they crossed the wire whether or
+	// not the page was delivered
+	const delivered = report.pages.reduce((n, p) => n + (p.size ?? 0), 0);
+	assertEquals(report.stats.bytes, delivered + report.pages[1].size!);
 });
 
 Deno.test("crawl() — an unknown URL is a completed 404, not a failure to crawl", async () => {

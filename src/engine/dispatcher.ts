@@ -156,6 +156,23 @@ export class CrawlEngine {
 
 	// --- dispatcher state ---
 	readonly #hosts = new Map<string, HostState>();
+	/**
+	 * Every URL whose bytes this run has actually retrieved, plus every URL a retrieval
+	 * passed *through* — the claimed URL, each redirect hop, and the final one. It is
+	 * the engine's own answer to "have we already been here", and it exists because
+	 * `visited` cannot answer it at either of the two moments that need it:
+	 *
+	 * - **At claim time** (`#dispatch`), because the PG store defines `has` as
+	 *   "enqueued or processed in this run, in any status" — `true` for every item the
+	 *   moment it is pushed.
+	 * - **At completion time** (`#fetchOne`), because the question there is about the
+	 *   *final* url of a response, and it has to be asked and answered without an
+	 *   `await` in between or two converging redirects both slip through.
+	 *
+	 * O(URLs fetched) — the same order as the trap tracker's per-hash counters, and a
+	 * URL string apiece.
+	 */
+	readonly #fetched = new Set<string>();
 	readonly #workers = new Set<Promise<void>>();
 	#globalInFlight = 0;
 	/** Pending frontier items, mirrored locally so `stats()` can stay synchronous. */
@@ -605,6 +622,19 @@ export class CrawlEngine {
 					break;
 				}
 				this.#queued = Math.max(0, this.#queued - 1);
+				// The enqueue-time duplicate check runs when the item is *pushed*; a
+				// redirect that lands on that same URL afterwards fetches those bytes
+				// while the item is still sitting in the frontier. Nothing re-asks the
+				// question later, so without this the page is fetched a second time —
+				// and on a site that redirects between two spellings of itself
+				// (`https:` -> `http:`, `/x` -> `/x/`), where the redirected document's
+				// own links are resolved against the *other* spelling, that is every
+				// page of it, twice.
+				if (!this.#opts.recrawl && this.#fetched.has(item.url)) {
+					await this.#frontier.ack(item.url);
+					this.#stats.recordSkip("duplicate");
+					continue;
+				}
 				this.#dispatchItem(item);
 				continue;
 			}
@@ -784,6 +814,58 @@ export class CrawlEngine {
 			await this.#frontier.release(item.url);
 			this.#queued++;
 			return;
+		}
+
+		// Where a redirect lands is only knowable after the fetch, so two urls that turn
+		// out to be one document cannot be deduped any earlier than here. When this one
+		// arrived somewhere the run has already been, the bytes are bytes we already
+		// delivered: the document is in the stream under the url that reached it first,
+		// and yielding it again would put one page in the result stream twice and — via
+		// `./pg` — two rows in the archive.
+		//
+		// The test and the claim are one synchronous step, deliberately. Two items whose
+		// redirects converge are routinely in flight at the same instant, and a check
+		// with an `await` anywhere inside it would let both through.
+		if (fetchResult !== undefined && !this.#opts.recrawl) {
+			const finalUrl = normalizeUrl(
+				fetchResult.finalUrl,
+				undefined,
+				this.#opts.normalize,
+			);
+			// both keys, and both *before* either is added: the claimed url can be in
+			// `#fetched` too — put there by a chain that converged on it while this
+			// item was in flight, which is precisely what the claim-time gate is too
+			// early to see
+			const duplicate = this.#fetched.has(item.url) ||
+				(finalUrl !== null && this.#fetched.has(finalUrl));
+			this.#fetched.add(item.url);
+			if (finalUrl !== null) this.#fetched.add(finalUrl);
+
+			if (duplicate) {
+				// the bytes crossed the wire either way, so they still count against
+				// `maxTotalBytes`; the page does not count as done, because it is not a
+				// page — this is the second path where an `onPageStart` is not followed
+				// by an `onPageDone`
+				this.#stats.recordSkip("duplicate", fetchResult.size);
+				this.#opts.logger?.debug(
+					`[crawl] ${maskUserinfo(item.url)} reached ` +
+						`${maskUserinfo(finalUrl ?? item.url)}, already crawled — not ` +
+						`delivered twice`,
+				);
+				await this.#frontier.ack(item.url);
+				await this.#visited.add(item.url, {
+					crawledAt: Date.now(),
+					status: fetchResult.status,
+				});
+				await this.#recordHops(
+					fetchResult,
+					fetchResult.status,
+					Date.now(),
+					item.url,
+				);
+				this.#checkBudgets();
+				return;
+			}
 		}
 
 		const fetchMs = fetchResult?.timing.total ?? Date.now() - startedAt;
@@ -966,8 +1048,9 @@ export class CrawlEngine {
 		fetchResult: FetchResult | undefined,
 		previous: VisitedState | undefined,
 	): Promise<void> {
+		const crawledAt = Date.now();
 		const state: Parameters<VisitedStore["add"]>[1] = {
-			crawledAt: Date.now(),
+			crawledAt,
 			attempts: result.attempts,
 		};
 		if (result.status > 0) state.status = result.status;
@@ -988,18 +1071,35 @@ export class CrawlEngine {
 
 		// Every URL the response passed through is marked visited too, so another
 		// referrer pointing at a redirect hop (or at the destination) never re-fetches
-		// the same bytes. These get the minimal record on purpose — they were never
-		// frontier items of their own.
+		// the same bytes.
 		if (fetchResult === undefined) return;
+		await this.#recordHops(fetchResult, result.status, crawledAt, item.url);
+	}
+
+	/**
+	 * Mark every url one response passed through — the redirect hops and the final
+	 * destination — as fetched: in `#fetched`, and in the visited store.
+	 *
+	 * The store records get the minimal state on purpose: these were never frontier
+	 * items of their own, so there is no `attempts` or validator to speak of, and
+	 * `VisitedStore.add` replaces rather than merges.
+	 *
+	 * @param skip The claimed url, which its caller has already recorded in full — a
+	 * minimal record here would overwrite it.
+	 */
+	async #recordHops(
+		fetchResult: FetchResult,
+		status: number,
+		crawledAt: number,
+		skip: string,
+	): Promise<void> {
 		const hops = [...fetchResult.redirects, fetchResult.finalUrl]
 			.slice(0, MAX_RECORDED_REDIRECTS);
 		for (const hop of hops) {
 			const url = normalizeUrl(hop, undefined, this.#opts.normalize);
-			if (url === null || url === item.url) continue;
-			await this.#visited.add(url, {
-				crawledAt: state.crawledAt,
-				status: result.status,
-			});
+			if (url === null || url === skip) continue;
+			this.#fetched.add(url);
+			await this.#visited.add(url, { crawledAt, status });
 		}
 	}
 

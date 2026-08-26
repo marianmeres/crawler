@@ -100,8 +100,16 @@ export interface ScopeOptions {
  * {@linkcode LinkRecord.skipReason}, emitted as `events.onLinkSkipped`, and counted in
  * {@linkcode CrawlStats.skippedByReason}.
  *
- * A skip is **never** turned into a placeholder {@linkcode PageResult} — nothing that
- * was not fetched appears in the result stream.
+ * A skip is **never** turned into a placeholder {@linkcode PageResult} — nothing the
+ * consumer did not get a page for appears in the result stream as an empty shell.
+ *
+ * `"duplicate"` is the one reason that can also be reached *after* a fetch: where a
+ * redirect lands is unknowable until it has landed, so a url that turns out to resolve
+ * to a document this run already delivered is skipped there rather than at enqueue. Its
+ * response bytes still count toward {@linkcode CrawlStats.bytes} and
+ * {@linkcode CrawlOptions.maxTotalBytes}; it is not counted in
+ * {@linkcode CrawlStats.done}, because the page it would have been is already in the
+ * stream under the url that reached it first.
  */
 export type SkipReason =
 	| "out-of-scope"
@@ -536,9 +544,12 @@ export interface CrawlEvents {
 		info: { crawlId: string; seeds: string[]; options: Readonly<CrawlOptions> },
 	): void;
 	/**
-	 * Paired with an `onPageDone` for every page except one: a fetch cut short by
-	 * {@linkcode Crawler.abort} releases its frontier claim instead of producing a
-	 * result, so that page is started and never finished.
+	 * Paired with an `onPageDone` for every page except two:
+	 *
+	 * - a fetch cut short by {@linkcode Crawler.abort} releases its frontier claim
+	 *   instead of producing a result, so that page is started and never finished;
+	 * - a fetch whose redirects land on a document this run already delivered is a
+	 *   `"duplicate"` skip (see {@linkcode SkipReason}) rather than a second page.
 	 */
 	onPageStart?(item: FrontierItem): void;
 	/** `ctx.fetchResult` gives body access — this is what a persistence sink consumes. */
