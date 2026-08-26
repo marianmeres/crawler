@@ -88,6 +88,22 @@ export interface ChangedUrl {
 	previousHash?: string;
 }
 
+/** What the archive remembers about one URL for the purpose of re-fetching it. */
+export interface UrlValidators {
+	/** `If-None-Match` on the next fetch. */
+	etag?: string;
+	/** `If-Modified-Since` on the next fetch. */
+	lastModified?: string;
+	/** SHA-256 hex of the last archived bytes. */
+	contentHash?: string;
+	/**
+	 * Whether the archive holds this URL's body — and therefore whether a `304` would be
+	 * useful. Without it there is nothing to re-extract links from, so the validators
+	 * above must not be sent.
+	 */
+	hasBody: boolean;
+}
+
 /** The archived bytes of one URL, with the metadata needed to decode them. */
 export interface ArchivedBody {
 	body: Uint8Array;
@@ -371,6 +387,28 @@ export async function brokenLinks(
 		if (row.error_kind !== null) broken.errorKind = row.error_kind;
 		return broken;
 	});
+}
+
+/** @internal */
+export async function getValidators(
+	ctx: CrawlerContext,
+	url: string,
+): Promise<UrlValidators | null> {
+	await ctx.ready();
+	const { rows } = await ctx.db.query(
+		`SELECT etag, last_modified, content_hash, (body IS NOT NULL) AS has_body
+			FROM ${ctx.tableNames.tableUrl}
+			WHERE tenant_id = $1 AND url = $2`,
+		[ctx.tenantId, url],
+	);
+	const row = rows[0];
+	if (!row) return null;
+
+	const validators: UrlValidators = { hasBody: row.has_body === true };
+	if (row.etag !== null) validators.etag = row.etag;
+	if (row.last_modified !== null) validators.lastModified = row.last_modified;
+	if (row.content_hash !== null) validators.contentHash = row.content_hash;
+	return validators;
 }
 
 /** @internal */

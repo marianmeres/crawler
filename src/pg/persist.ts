@@ -10,7 +10,11 @@
  *
  * The one column with real logic behind it is `__crawler_url.body`: the archive holds the
  * *last good* body next to the *last observed* status and validators, so a 304, a 500 and
- * a `persistBody: false` all leave the stored bytes alone.
+ * a `persistBody: false` all leave the stored bytes alone. Note the second half of that
+ * CASE — "the hash did not change" only keeps the stored bytes when there *are* stored
+ * bytes. `VisitedStore.add` records the same hash from the engine, and events are not
+ * awaited, so it regularly gets there first; without the `body IS NOT NULL` guard the
+ * body would look unchanged against a row that never had one and would never be written.
  *
  * @module
  */
@@ -95,8 +99,9 @@ export async function persistPage(
 					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
 					ON CONFLICT (tenant_id, url) DO UPDATE SET
 						body = CASE
-							WHEN EXCLUDED.body IS NULL
-								OR ${tableUrl}.content_hash
+							WHEN EXCLUDED.body IS NULL THEN ${tableUrl}.body
+							WHEN ${tableUrl}.body IS NOT NULL
+								AND ${tableUrl}.content_hash
 									IS NOT DISTINCT FROM EXCLUDED.content_hash
 							THEN ${tableUrl}.body ELSE EXCLUDED.body END,
 						content_type  = COALESCE(EXCLUDED.content_type, ${tableUrl}.content_type),

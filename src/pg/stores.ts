@@ -22,6 +22,8 @@ import type { VisitedState, VisitedStore } from "../stores/types.ts";
 // type-only, and `crawler-pg.ts` imports the classes below as values: the cycle is
 // erased at compile time, exactly as in `../stores/types.ts`
 import type { CrawlerContext } from "./crawler-pg.ts";
+import { getBody } from "./query.ts";
+import type { ArchivedBody } from "./query.ts";
 
 /** Epoch ms → `TIMESTAMPTZ`, with a NULL that COALESCEs to the column's default. */
 const AS_TIMESTAMP = (param: string) =>
@@ -283,5 +285,13 @@ export class PgVisitedStore implements VisitedStore {
 			[this.#crawlId],
 		);
 		return rows[0].count;
+	}
+
+	/**
+	 * The archived bytes — the other half of {@linkcode VisitedState.hasBody}, and the
+	 * reason an incremental re-crawl can traverse a site it did not re-download.
+	 */
+	getBody(url: string): Promise<ArchivedBody | null> {
+		return getBody(this.#ctx, url);
 	}
 }

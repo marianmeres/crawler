@@ -125,6 +125,21 @@ export interface VisitedStore {
 	add(url: string, state: VisitedState): Promise<void>;
 	get(url: string): Promise<VisitedState | undefined>;
 	count(): Promise<number>;
+	/**
+	 * The stored body, when this store keeps one.
+	 *
+	 * Optional, and the engine calls it in exactly one place: a `304 Not Modified`
+	 * arrives without a body, so this is where that page's links come from. Only ever
+	 * called where {@linkcode VisitedState.hasBody} was `true`, which is also the gate
+	 * that decides whether a `304` can be asked for at all — a store that keeps no
+	 * bodies (the in-memory one) never sees this method called.
+	 *
+	 * @returns The archived bytes plus what is needed to decode them, or `null` when
+	 * nothing is stored for `url`.
+	 */
+	getBody?(url: string): Promise<
+		{ body: Uint8Array; contentType?: string; charset?: string } | null
+	>;
 }
 
 /** What {@linkcode VisitedStore} remembers about one completed URL. */

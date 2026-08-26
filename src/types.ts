@@ -277,6 +277,11 @@ export interface CrawlOptions {
 	 * Enqueue URLs even if the visited store already has them, re-fetching
 	 * conditionally (`If-None-Match`/`If-Modified-Since`) where the store holds a body.
 	 * Default `false`.
+	 *
+	 * A page that answers `304 Not Modified` still yields its links: they are
+	 * re-extracted from the stored body — under the *current* options, not the ones the
+	 * archive was built with — so an unchanged site is traversed in full without being
+	 * downloaded again.
 	 */
 	recrawl?: boolean;
 	/**

@@ -43,7 +43,12 @@ import { resolveCrawlOptions } from "../options.ts";
 import type { ResolvedCrawlOptions } from "../options.ts";
 import { createMemoryFrontier } from "../stores/memory-frontier.ts";
 import { createMemoryVisited } from "../stores/memory-visited.ts";
-import type { FrontierItem, FrontierStore, VisitedStore } from "../stores/types.ts";
+import type {
+	FrontierItem,
+	FrontierStore,
+	VisitedState,
+	VisitedStore,
+} from "../stores/types.ts";
 import type {
 	CrawlEvents,
 	CrawlOptions,
@@ -189,6 +194,7 @@ export class CrawlEngine {
 	#warnedRegionFallback = false;
 	#warnedBeforeExtract = false;
 	#warnedPriority = false;
+	#warnedNoStoredBody = false;
 
 	// --- precomputed extraction option sets (see `#extract`) ---
 	readonly #extractAll: ExtractLinksOptions;
@@ -733,6 +739,13 @@ export class CrawlEngine {
 
 		this.#emit("onPageStart", (h) => h(item));
 
+		// read once and kept for the whole page: it seeds the conditional headers, and a
+		// `304` answer then needs it again — the stored hash and validators are what that
+		// bodyless response carries forward
+		const previous = this.#opts.recrawl
+			? await this.#visited.get(item.url)
+			: undefined;
+
 		let fetchResult: FetchResult | undefined;
 		let error: PageResult["error"] | undefined;
 		// what was actually thrown, kept beside its flattened `PageResult["error"]`
@@ -745,7 +758,7 @@ export class CrawlEngine {
 				url: item.url,
 				signal: this.#requestSignal(),
 				retainBody: !checkOnly,
-				headers: await this.#conditionalHeaders(item),
+				headers: conditionalHeaders(previous),
 				meta: {
 					crawlId: this.crawlId,
 					depth: item.depth,
@@ -818,6 +831,15 @@ export class CrawlEngine {
 					) {
 						html = await fetchResult.text();
 					}
+				} else if (result.notModified) {
+					// unchanged, so the archived bytes *are* this page: it keeps its
+					// stored hash, counts as its stored body for trap detection, and its
+					// links come out of the store instead of off the wire
+					if (previous?.contentHash !== undefined) {
+						result.contentHash = previous.contentHash;
+						softDup = this.#traps.countHash(result.contentHash, result.url);
+					}
+					if (!checkOnly) html = await this.#storedHtml(item.url);
 				}
 				if (html !== undefined) {
 					await this.#readDocument(
@@ -890,7 +912,7 @@ export class CrawlEngine {
 		await this.#channel!.push(result);
 
 		await this.#frontier.ack(item.url);
-		await this.#recordVisited(item, result, fetchResult);
+		await this.#recordVisited(item, result, fetchResult, previous);
 	}
 
 	/** The per-request signal: the engine's own, composed with the consumer's. */
@@ -901,27 +923,41 @@ export class CrawlEngine {
 	}
 
 	/**
-	 * `If-None-Match` / `If-Modified-Since` for a re-crawl — but only where the store
-	 * actually holds a body: a `304` is worth asking for exactly when there is
-	 * something to re-extract links from.
+	 * The links of a page that answered `304 Not Modified`, re-extracted from the body
+	 * the store kept — the response itself carries none.
+	 *
+	 * Re-extracting rather than copying the previous run's edges is what keeps an
+	 * incremental crawl honest: scope, `onLink` and every extract option are the ones in
+	 * force *now*, not the ones that happened to be in force when the page was archived.
+	 *
+	 * `undefined` when there is nothing to read — a store that keeps no bodies, an
+	 * archive that was pruned, or a document this engine would not have read links from
+	 * anyway.
 	 */
-	async #conditionalHeaders(
-		item: FrontierItem,
-	): Promise<Record<string, string> | undefined> {
-		if (!this.#opts.recrawl) return undefined;
-		const state = await this.#visited.get(item.url);
-		if (state?.hasBody !== true) return undefined;
-
-		const headers: Record<string, string> = {};
-		if (state.etag) headers["If-None-Match"] = state.etag;
-		if (state.lastModified) headers["If-Modified-Since"] = state.lastModified;
-		return Object.keys(headers).length > 0 ? headers : undefined;
+	async #storedHtml(url: string): Promise<string | undefined> {
+		const stored = await this.#visited.getBody?.(url);
+		if (!stored) {
+			// only reachable when a store reported `hasBody` and then could not produce
+			// one: the page is delivered, it simply contributes no links
+			if (!this.#warnedNoStoredBody) {
+				this.#warnedNoStoredBody = true;
+				this.#opts.logger?.warn(
+					`[crawl] ${maskUserinfo(url)} answered 304 but the store has no ` +
+						`body for it — its links cannot be re-extracted (warned once ` +
+						`per crawl)`,
+				);
+			}
+			return undefined;
+		}
+		if (!HTML_CONTENT_TYPES.has(stored.contentType ?? "")) return undefined;
+		return decodeStoredBody(stored.body, stored.charset);
 	}
 
 	async #recordVisited(
 		item: FrontierItem,
 		result: PageResult,
 		fetchResult: FetchResult | undefined,
+		previous: VisitedState | undefined,
 	): Promise<void> {
 		const state: Parameters<VisitedStore["add"]>[1] = {
 			crawledAt: Date.now(),
@@ -933,6 +969,14 @@ export class CrawlEngine {
 		if (etag) state.etag = etag;
 		const lastModified = fetchResult?.headers.get("last-modified");
 		if (lastModified) state.lastModified = lastModified;
+		// `add` replaces rather than merges, so a `304` — which repeats neither the
+		// validators nor a body to hash — would otherwise erase the very record that
+		// produced it, and the next re-crawl would have nothing to send
+		if (result.notModified && previous !== undefined) {
+			state.etag ??= previous.etag;
+			state.lastModified ??= previous.lastModified;
+			state.contentHash ??= previous.contentHash;
+		}
 		await this.#visited.add(item.url, state);
 
 		// Every URL the response passed through is marked visited too, so another
@@ -1591,6 +1635,33 @@ export class CrawlEngine {
 function applyRobots(result: PageResult, directives: RobotsDirectives): void {
 	if (!directives.noindex && !directives.nofollow) return;
 	result.robots = { noindex: directives.noindex, nofollow: directives.nofollow };
+}
+
+/**
+ * `If-None-Match` / `If-Modified-Since` from what the store remembers — but only where
+ * it actually holds a body: a `304` is worth asking for exactly when there is something
+ * to re-extract links from.
+ */
+function conditionalHeaders(
+	state: VisitedState | undefined,
+): Record<string, string> | undefined {
+	if (state?.hasBody !== true) return undefined;
+
+	const headers: Record<string, string> = {};
+	if (state.etag) headers["If-None-Match"] = state.etag;
+	if (state.lastModified) headers["If-Modified-Since"] = state.lastModified;
+	return Object.keys(headers).length > 0 ? headers : undefined;
+}
+
+/** Archived bytes → text, per the charset they were stored with. */
+function decodeStoredBody(body: Uint8Array, charset?: string): string {
+	try {
+		return new TextDecoder(charset || "utf-8").decode(body);
+	} catch {
+		// `TextDecoder` throws on a label it does not know, and a stored charset comes
+		// from a response header — i.e. from a stranger
+		return new TextDecoder().decode(body);
+	}
 }
 
 /** `new URL(url).hostname`, or `""` for anything that is not a URL. */

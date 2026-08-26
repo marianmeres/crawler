@@ -30,7 +30,14 @@ import {
 } from "./_schema.ts";
 import { isPool, type Queryable, withTransaction } from "./utils/with-transaction.ts";
 import * as query from "./query.ts";
-import type { ArchivedBody, BrokenLink, ChangedUrl, LinkRow, PageRow } from "./query.ts";
+import type {
+	ArchivedBody,
+	BrokenLink,
+	ChangedUrl,
+	LinkRow,
+	PageRow,
+	UrlValidators,
+} from "./query.ts";
 
 /** The tenant every row falls into when the consumer is not multi-tenant. */
 export const DEFAULT_TENANT_ID = "_default";
@@ -117,6 +124,26 @@ export interface CrawlPersistence {
 	 */
 	persistPage(res: PageResult, ctx?: { fetchResult?: FetchResult }): Promise<void>;
 	/**
+	 * What the archive remembers about `url` — the conditional-request inputs — or `null`
+	 * when this tenant has never fetched it.
+	 *
+	 * A crawl driven by {@linkcode CrawlPersistence.stores} needs none of this: the
+	 * engine reads the same data through `visited.get()` and seeds the headers itself.
+	 * This is for a consumer fetching on their own and asking the archive what to send —
+	 * and the rule is `hasBody`: without a stored body a `304` has nothing to fall back
+	 * on, so the validators must not be sent.
+	 */
+	getValidators(url: string): Promise<UrlValidators | null>;
+	/**
+	 * The archived bytes of `url`, or `null` when none are stored — the other half of
+	 * {@linkcode CrawlPersistence.getValidators}, for re-extracting links from a page
+	 * that answered `304`.
+	 *
+	 * The archive is per tenant, not per crawl, so this reads across runs; the URL must
+	 * be the normalized one (the `url` of a `PageRow`/`PageResult`).
+	 */
+	getStoredBody(url: string): Promise<ArchivedBody | null>;
+	/**
 	 * Publishes a live snapshot into `__crawler_crawl.stats`, which is the only way to
 	 * watch a long crawl from another process.
 	 *
@@ -192,6 +219,14 @@ class CrawlHandle implements CrawlPersistence {
 
 	persistPage(res: PageResult, ctx?: { fetchResult?: FetchResult }): Promise<void> {
 		return persistPage(this.#ctx, this.#row.id, res, ctx?.fetchResult);
+	}
+
+	getValidators(url: string): Promise<UrlValidators | null> {
+		return query.getValidators(this.#ctx, url);
+	}
+
+	getStoredBody(url: string): Promise<ArchivedBody | null> {
+		return query.getBody(this.#ctx, url);
 	}
 
 	async progress(stats: CrawlStats): Promise<void> {
