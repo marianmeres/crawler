@@ -49,11 +49,11 @@ Verify: deno task test
 
 | Status | ID | Deps | Task | Source | Commit |
 |--------|----|------|------|--------|--------|
-| ✅ | T15 | — | Events, `safeEmit`, throttled progress | [01](./01-engine-completion.md) T15 | — |
-| ✅ | T16 | — | Budgets and `stoppedBy` semantics | [01](./01-engine-completion.md) T16 | — |
-| ✅ | T17 | — | Trap detection | [01](./01-engine-completion.md) T17 | — |
-| ✅ | T18 | — | `parseSitemap` + robots `Sitemap:` seeding | [01](./01-engine-completion.md) T18 | — |
-| ✅ | T39 | — | Mask userinfo credentials in every message | [01](./01-engine-completion.md) T39 | — |
+| ✅ | T15 | — | Events, `safeEmit`, throttled progress | [01](./01-engine-completion.md) T15 | da835bb |
+| ✅ | T16 | — | Budgets and `stoppedBy` semantics | [01](./01-engine-completion.md) T16 | 6175335 |
+| ✅ | T17 | — | Trap detection | [01](./01-engine-completion.md) T17 | 2ade397 |
+| ✅ | T18 | — | `parseSitemap` + robots `Sitemap:` seeding | [01](./01-engine-completion.md) T18 | e1b4a1e |
+| ✅ | T39 | — | Mask userinfo credentials in every message | [01](./01-engine-completion.md) T39 | c410fb6 |
 
 No database, no new submodule, no external package: this whole sprint runs against the fake
 transport from task 13. Three of the five tasks wire options that are already declared,
@@ -66,9 +66,9 @@ Branch: `sprint-03-pg`
 
 | Status | ID | Deps | Task | Source | Commit |
 |--------|----|------|------|--------|--------|
-| ✅ | T21 | — | PG test harness, env and gating | [02](./02-pg-persistence.md) T21 | — |
-| ✅ | T19 | T21 | Schema DDL — the 5 tables | [02](./02-pg-persistence.md) T19 | — |
-| ✅ | T20 | T19 | `createCrawlerPg` factory + lifecycle | [02](./02-pg-persistence.md) T20 | — |
+| ✅ | T21 | — | PG test harness, env and gating | [02](./02-pg-persistence.md) T21 | 99c27c6 |
+| ✅ | T19 | T21 | Schema DDL — the 5 tables | [02](./02-pg-persistence.md) T19 | a92b1c3 |
+| ✅ | T20 | T19 | `createCrawlerPg` factory + lifecycle | [02](./02-pg-persistence.md) T20 | 3b311c0 |
 | ⬜ | T22 | T20 | `PgFrontierStore` / `PgVisitedStore` | [02](./02-pg-persistence.md) T22 | — |
 | ⬜ | T23 | T22 | `persistPage` writers | [02](./02-pg-persistence.md) T23 | — |
 | ⬜ | T24 | T20 | Live progress writer | [02](./02-pg-persistence.md) T24 | — |
