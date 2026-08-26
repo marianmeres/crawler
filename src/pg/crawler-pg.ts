@@ -16,9 +16,10 @@
  */
 
 import type pg from "pg";
-import type { CrawlStats, Logger, StoppedBy } from "../types.ts";
+import type { CrawlStats, FetchResult, Logger, PageResult, StoppedBy } from "../types.ts";
 import type { FrontierStore, VisitedStore } from "../stores/types.ts";
 import { PgFrontierStore, PgVisitedStore } from "./stores.ts";
+import { persistPage } from "./persist.ts";
 import {
 	_initialize,
 	_schemaCreate,
@@ -27,7 +28,7 @@ import {
 	_uninstall,
 	type CrawlerTableNames,
 } from "./_schema.ts";
-import { isPool, type Queryable } from "./utils/with-transaction.ts";
+import { isPool, type Queryable, withTransaction } from "./utils/with-transaction.ts";
 
 /** The tenant every row falls into when the consumer is not multi-tenant. */
 export const DEFAULT_TENANT_ID = "_default";
@@ -48,6 +49,18 @@ export interface CrawlerPgOptions {
 	tablePrefix?: string;
 	/** Row-level isolation for every read and write. Default {@linkcode DEFAULT_TENANT_ID}. */
 	tenantId?: string;
+	/**
+	 * Archive the response body in `__crawler_url`. Default `true`.
+	 *
+	 * The predicate form is the size/cost knob — `(res) => res.contentType === "text/html"`
+	 * keeps the pages worth diffing and skips the PDFs. Whatever it says, a body is only
+	 * ever written for an ok response that retained one.
+	 *
+	 * Turning it off is not free: an incremental re-crawl only sends conditional headers
+	 * where a body is stored (that is the rule that removes the "304 with nothing to fall
+	 * back on" corner), so a bodyless URL is always re-fetched in full.
+	 */
+	persistBody?: boolean | ((res: PageResult) => boolean);
 	/** Silent when absent. */
 	logger?: Logger;
 }
@@ -82,6 +95,21 @@ export interface CrawlPersistence {
 	 */
 	readonly stores: { frontier: FrontierStore; visited: VisitedStore };
 	/**
+	 * Writes one completed page — the URL archive (body included), the per-run page row,
+	 * this page's outgoing edges and the frontier ack — in a single transaction.
+	 *
+	 * Wire it straight to an `onPageDone` event or to the `run()` loop; the signature is
+	 * that callback's, and `ctx` is only read for its `fetchResult`, the body access path.
+	 *
+	 * Replaying it on the same result is safe by construction: every write is an upsert or
+	 * a replace, so a retried job re-persists rather than duplicating.
+	 *
+	 * `res.data` — whatever `onPage` returned — must be plain JSON-serializable data. A
+	 * value that is not (a `BigInt`, most notably) is stored as `NULL` with one logged
+	 * warning; it never fails the page.
+	 */
+	persistPage(res: PageResult, ctx?: { fetchResult?: FetchResult }): Promise<void>;
+	/**
 	 * `pending` (or a resumed `failed`/`stopped`) → `running`. The first call stamps
 	 * `startedAt`; later ones keep it, so a resumed attempt reports the original start.
 	 */
@@ -105,9 +133,13 @@ export interface CrawlerContext {
 	db: Queryable;
 	tableNames: CrawlerTableNames;
 	tenantId: string;
+	/** Resolved to a value: the option's `undefined` means `true`. */
+	persistBody: boolean | ((res: PageResult) => boolean);
 	logger?: Logger;
 	/** Resolves once the schema is installed; every DB method awaits it first. */
 	ready(): Promise<void>;
+	/** One BEGIN/COMMIT around `fn`, on its own pooled client. */
+	transaction<T>(fn: (client: Queryable) => Promise<T>): Promise<T>;
 }
 
 class CrawlHandle implements CrawlPersistence {
@@ -126,6 +158,10 @@ class CrawlHandle implements CrawlPersistence {
 
 	get crawl(): CrawlRow {
 		return this.#row;
+	}
+
+	persistPage(res: PageResult, ctx?: { fetchResult?: FetchResult }): Promise<void> {
+		return persistPage(this.#ctx, this.#row.id, res, ctx?.fetchResult);
 	}
 
 	async markRunning(): Promise<void> {
@@ -200,8 +236,10 @@ export class CrawlerPg {
 			db: this.#db as Queryable,
 			tableNames: this.#tableNames,
 			tenantId: this.#tenantId,
+			persistBody: options.persistBody ?? true,
 			logger: this.#logger,
 			ready: () => this.#initOnce(),
+			transaction: (fn) => withTransaction(this.#db, (client) => fn(client)),
 		};
 	}
 
