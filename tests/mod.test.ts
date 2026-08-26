@@ -159,7 +159,7 @@ Deno.test("the published subpaths resolve, and to the same modules", async () =>
 	// and they actually work when reached that way
 	assertEquals(
 		pkgUrl.normalizeUrl("https://Ex.com/a/?b=2&a=1"),
-		"https://ex.com/a?a=1&b=2",
+		"https://ex.com/a/?a=1&b=2",
 	);
 	assertEquals(
 		pkgExtract.extractLinks(`<a href="/x">t</a>`, "https://a.com/")[0].url,

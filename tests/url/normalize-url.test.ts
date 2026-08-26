@@ -202,6 +202,9 @@ Deno.test("normalizeUrl: a hostile slash run stays linear", () => {
 	const started = performance.now();
 	const out = normalizeUrl(hostile, undefined, {
 		collapseSlashes: false,
+		// explicit: the scan under test only runs under "strip", which is no longer the
+		// default — without this the case would pass by never reaching it
+		trailingSlash: "strip",
 		maxLength: 1_000_000,
 	});
 	const elapsed = performance.now() - started;

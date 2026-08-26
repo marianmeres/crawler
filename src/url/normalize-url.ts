@@ -32,7 +32,25 @@ export interface NormalizeOptions {
 	normalizeEncoding?: boolean;
 	/** Collapse `//` runs in the path (`/a//b` → `/a/b`). Default `true`. */
 	collapseSlashes?: boolean;
-	/** Trailing-slash policy; the root `"/"` is never touched. Default `"strip"`. */
+	/**
+	 * Trailing-slash policy; the root `"/"` is never touched. Default `"keep"`.
+	 *
+	 * `"keep"` is the default because `/x` and `/x/` are not interchangeable: for a
+	 * directory-style resource the slash is what makes the page's own relative links
+	 * resolve (`../sibling/` is `/dir/../sibling/` from `/dir/`, but `/sibling/` from
+	 * `/dir`), which is exactly why servers answer the slashless spelling with a 301
+	 * rather than the page. Stripping it therefore asks for a url the site does not
+	 * publish, and buys a redirect per page in exchange for a tidier key.
+	 *
+	 * RFC 3986 §6.2.2 lists the normalizations that are safe on syntax alone — case,
+	 * percent-encoding, dot segments — and this is not among them; §6.2.4 puts it in
+	 * the class a crawler *learns* by watching `/x` redirect to `/x/`. Which is what
+	 * happens here: request what the site published, and let the redirect say when two
+	 * spellings are one page.
+	 *
+	 * `"strip"` remains the right choice for a pure dedup key — comparing urls from
+	 * mixed sources, say — where nothing is going to be fetched.
+	 */
 	trailingSlash?: "strip" | "keep";
 	/**
 	 * Rebuild the query via `URLSearchParams` (enables the three options below).
@@ -241,7 +259,7 @@ function matchesStripParam(
  * @example
  * ```ts
  * normalizeUrl("https://Ex.com/a/?utm_source=x&b=2&a=1#top");
- * // => "https://ex.com/a?a=1&b=2"
+ * // => "https://ex.com/a/?a=1&b=2"     (the trailing slash is part of the identity)
  * normalizeUrl("../b", "https://ex.com/x/y/z");
  * // => "https://ex.com/x/b"
  * normalizeUrl("mailto:a@b.com"); // => null
@@ -261,7 +279,7 @@ export function normalizeUrl(
 	const keepHashbang = o.keepHashbang ?? false;
 	const normalizeEncoding = o.normalizeEncoding ?? true;
 	const collapseSlashes = o.collapseSlashes ?? true;
-	const trailingSlash = o.trailingSlash ?? "strip";
+	const trailingSlash = o.trailingSlash ?? "keep";
 	const normalizeQuery = o.normalizeQuery ?? true;
 	const stripParams = o.stripParams ?? DEFAULT_STRIP_PARAMS;
 	const sortParams = o.sortParams ?? true;

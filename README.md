@@ -183,6 +183,39 @@ standalone `isSameSite`/`classifyLink` in the `./url` submodule accept a
 `getRegistrableDomain` override backed by a real PSL; `CrawlOptions.scope` does not
 expose that hook.
 
+## URLs: what counts as the same page
+
+Normalization _is_ deduplication here — the frontier, the visited set and the PG tables
+all key on the string `normalizeUrl` returns. The defaults canonicalize what is safe on
+syntax alone (case, percent-encoding, `.`/`..`, default ports, IDN) and drop a list of
+tracking parameters (`utm_*`, `fbclid`, `gclid`, session ids, …; see
+`DEFAULT_STRIP_PARAMS`). Override any of it with `normalize`, which takes the full
+[`NormalizeOptions`](./src/url/normalize-url.ts).
+
+### Trailing slashes are kept
+
+`normalize.trailingSlash` defaults to `"keep"`, and that is deliberate: `/a` and `/a/`
+are not interchangeable. For a directory-style resource the slash is what makes the
+page's own relative links resolve — `../sibling/` is `/dir/../sibling/` from `/dir/`, but
+`/sibling/` from `/dir` — which is exactly why a server answers the slashless spelling
+with a 301 instead of the page.
+
+So stripping it asks for a URL the site does not publish and buys a redirect on every
+page. RFC 3986 §6.2.2 lists the normalizations that are safe on syntax alone and this is
+not among them; §6.2.4 puts it in the class a crawler _learns_ by watching `/x` redirect
+to `/x/` — which is what happens here, since a redirect marks its destination visited.
+
+Pass `normalize: { trailingSlash: "strip" }` when you want a tidy dedup key and are not
+going to fetch anything, or when you know the target serves both spellings.
+
+### Two URLs, one document
+
+Where a redirect lands is unknowable until it has landed, so two URLs that turn out to be
+one page cannot always be deduped before the fetch. When a response's final URL is one
+this run already delivered, the page is **not** yielded a second time: it is counted as a
+`"duplicate"` skip (its bytes still count toward `maxTotalBytes`), and the document stays
+in the stream exactly once, under the URL that reached it first.
+
 ## Politeness and robots.txt
 
 `perHostDelay`, `perHostConcurrency` and the global `concurrency` are the politeness

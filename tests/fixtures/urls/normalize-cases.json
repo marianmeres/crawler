@@ -254,7 +254,7 @@
 					"ftp:"
 				]
 			},
-			"expected": "ftp://a.com/x"
+			"expected": "ftp://a.com/x/"
 		},
 		{
 			"group": "scheme-gate",
@@ -470,7 +470,10 @@
 			"group": "path-shape",
 			"name": "strips a trailing slash",
 			"input": "https://a.com/dir/",
-			"expected": "https://a.com/dir"
+			"expected": "https://a.com/dir",
+			"opts": {
+				"trailingSlash": "strip"
+			}
 		},
 		{
 			"group": "path-shape",
@@ -488,11 +491,20 @@
 			"group": "path-shape",
 			"name": "strips a trailing slash in front of a query",
 			"input": "https://a.com/dir/?a=1",
-			"expected": "https://a.com/dir?a=1"
+			"expected": "https://a.com/dir?a=1",
+			"opts": {
+				"trailingSlash": "strip"
+			}
 		},
 		{
 			"group": "path-shape",
-			"name": "trailing slash can be kept",
+			"name": "a trailing slash is kept by default",
+			"input": "https://a.com/dir/",
+			"expected": "https://a.com/dir/"
+		},
+		{
+			"group": "path-shape",
+			"name": "trailing slash is kept explicitly",
 			"input": "https://a.com/dir/",
 			"opts": {
 				"trailingSlash": "keep"
@@ -513,7 +525,8 @@
 			"name": "all trailing slashes go in one pass",
 			"input": "https://a.com/dir///",
 			"opts": {
-				"collapseSlashes": false
+				"collapseSlashes": false,
+				"trailingSlash": "strip"
 			},
 			"expected": "https://a.com/dir"
 		},
@@ -522,7 +535,8 @@
 			"name": "a slash-only path settles even without collapsing",
 			"input": "https://a.com///",
 			"opts": {
-				"collapseSlashes": false
+				"collapseSlashes": false,
+				"trailingSlash": "strip"
 			},
 			"expected": "https://a.com/"
 		},
@@ -903,7 +917,7 @@
 			"opts": {
 				"stripWww": true
 			},
-			"expected": "https://example.com/Blog/Post?id=42"
+			"expected": "https://example.com/Blog/Post/?id=42"
 		},
 		{
 			"group": "real-world",
@@ -915,7 +929,7 @@
 			"group": "real-world",
 			"name": "a search results page",
 			"input": "https://a.com/search/?q=deno+url&page=2&fbclid=xyz",
-			"expected": "https://a.com/search?page=2&q=deno+url"
+			"expected": "https://a.com/search/?page=2&q=deno+url"
 		},
 		{
 			"group": "real-world",
