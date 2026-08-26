@@ -16,7 +16,8 @@ Website crawler: frontier, scope, politeness, link graph, budgets. Transport is
 - **Check**: `deno check src/**/*.ts tests/**/*.ts example/recipes/*.ts example/server.ts
   example/src/main.ts`.
 - **Example app**: `deno task example` (needs `EXAMPLE_PG_*`), `deno task example:build`
-  after touching `example/src/`. See `example/README.md`.
+  after touching `example/src/`. See `example/README.md`. Playwright is optional and
+  dynamically imported — never a dependency of this package.
 
 ## Project Structure
 
@@ -34,7 +35,8 @@ src/engine/         — internals: dispatcher, channel, scope, robots-gate, trap
                       private-host
 tests/              — one file per concern; `_helpers.ts` (fake fetcher + mini-site),
                       `_pg.ts` (TEST_PG_* pool), `_fixtures.ts`
-example/            — the interactive app: server.ts (HTTP API + both runners),
+example/            — the interactive app: server.ts (HTTP API, both runners, the
+                      optional Playwright browser adapter, html-extract on read),
                       index.html (+ templates/styles), src/main.ts (vanilla UI),
                       dist/bundle.js (committed), theme.css (generated), reboot.css
 example/recipes/    — 6 runnable recipes; import BY PACKAGE NAME, never from `src/`
@@ -60,16 +62,22 @@ scripts/gen-example-{version,theme}.ts — generated example assets; run by exam
    disposed.
 6. **Memory-first, always.** `./pg` is opt-in; nothing in `src/` outside `src/pg/` and
    `src/steve/` may require a database.
-7. **Mask credentials in every message.** URLs with userinfo stay **verbatim** in the
+7. **`__crawler_url` has two writers.** `persistPage` writes the body (and everything
+   else); `PgVisitedStore.add` stamps `etag`/`last_modified`/`content_hash` from outside
+   that transaction, in either order. So a matching `content_hash` never proves the bytes
+   are unchanged — the archive body is `COALESCE(EXCLUDED.body, stored)`, and only a write
+   with no bytes at all defers to what is stored. Pinned by
+   `tests/pg-persist.test.ts`.
+8. **Mask credentials in every message.** URLs with userinfo stay **verbatim** in the
    fetch, the frontier key, `PageResult.url` and the PG rows — but every `logger?.*`
    call, warning and `Error` that interpolates a URL runs it through
    `maskUserinfo()` (`src/url/_mask-userinfo.ts`) first. The invariant is "every message
    site is masked", including sites whose URL provably cannot carry userinfo today.
-8. **Explicit export lists, never `export *` from an internals file.** `_html.ts`,
+9. **Explicit export lists, never `export *` from an internals file.** `_html.ts`,
    `_schema.ts` and `normalize-url.ts`'s `@internal` helper must not reach consumers.
-9. **Examples are consumer code.** They import `@marianmeres/crawler[/sub]` through the
-   self-import map in `deno.json`, and guard their runnable half behind
-   `import.meta.main`.
+10. **Examples are consumer code.** They import `@marianmeres/crawler[/sub]` through the
+    self-import map in `deno.json`, and guard their runnable half behind
+    `import.meta.main`.
 
 ## Store Interfaces (`./stores`)
 

@@ -72,6 +72,8 @@ interface PageRow {
 	errorKind: string | null;
 	errorMessage: string | null;
 	skipReason: string | null;
+	/** Whatever `onPage` returned — here, the crawl-time html-extract summary. */
+	data: Record<string, unknown> | null;
 }
 
 interface LinkRow {
@@ -117,6 +119,41 @@ interface Snapshot {
 	more: boolean;
 	stoppable: boolean;
 	error?: string;
+}
+
+/** `@marianmeres/html-extract`'s document, JSON-round-tripped (the lazy bits materialized). */
+interface Doc {
+	title?: string;
+	lang?: string;
+	metadata: Record<string, unknown>;
+	jsonLd: unknown[];
+	embeddedJson: Record<string, unknown>;
+	microdata: unknown[];
+	content: null | {
+		html: string;
+		markdown: string;
+		text: string;
+		textLength: number;
+		linkDensity: number;
+		via: string;
+	};
+}
+
+interface PageDoc {
+	html: string | null;
+	bytes: number;
+	truncated: boolean;
+	contentType: string | null;
+	charset: string | null;
+	fetchedAt: string | null;
+	doc: Doc | null;
+	error?: string;
+}
+
+interface Capabilities {
+	browser: boolean;
+	allowImpolite: boolean;
+	caps: Record<string, unknown>;
 }
 
 interface RecentRow {
@@ -194,6 +231,30 @@ const host = (url: string): string => {
 	}
 };
 
+/** A `<dt>/<dd>` pair appended to a `dl.kv`. Skips nothing — an empty value is a fact. */
+function kv(list: HTMLElement, k: string, v: unknown): void {
+	const dt = document.createElement("dt");
+	dt.textContent = k;
+	const dd = document.createElement("dd");
+	dd.textContent = v === null || v === undefined || v === ""
+		? "—"
+		: typeof v === "number"
+		? nf.format(v)
+		: String(v);
+	list.append(dt, dd);
+}
+
+/**
+ * Inject a `<base>` so the archived DOM's relative CSS, images and fonts resolve against
+ * the origin it came from rather than against `about:srcdoc`, where they all 404.
+ */
+function withBase(html: string, url: string): string {
+	const base = `<base href="${url.replace(/"/g, "&quot;")}">`;
+	return /<head[^>]*>/i.test(html)
+		? html.replace(/<head[^>]*>/i, (open) => open + base)
+		: base + html;
+}
+
 /** Prepend `rows` (which arrive oldest-first) and trim the tail back to the cap. */
 function prepend(body: HTMLElement, nodes: HTMLElement[]): void {
 	if (!nodes.length) return;
@@ -248,6 +309,7 @@ const app = createView((track) => {
 		sitemaps: on("sitemaps"),
 		respectRobots: on("respectRobots"),
 		persistBody: on("persistBody"),
+		js: on("js"),
 	});
 
 	const setDefaults = (): void => {
@@ -284,6 +346,8 @@ const app = createView((track) => {
 			: "";
 
 	const reset = (): void => {
+		closeModal();
+		byUrl.clear();
 		cursors = { pages: 0, links: 0 };
 		totals = { pages: 0, links: 0 };
 		brokenLoaded = false;
@@ -352,6 +416,10 @@ const app = createView((track) => {
 		const nodes = rows.map((p) => {
 			const node = fromTemplate("tpl-page-row");
 			const q = refs(node);
+			// the row IS the handle: the modal needs the PageRow it already has, and
+			// the archive is keyed on this exact normalized url
+			byUrl.set(p.url, p);
+			node.dataset.url = p.url;
 			const code = p.notModified ? 304 : p.status;
 			q.status.textContent = code == null ? (p.errorKind ?? "error") : String(code);
 			q.status.classList.add(`st-${code == null ? "x" : String(code)[0]}`);
@@ -449,6 +517,147 @@ const app = createView((track) => {
 		r.recent.replaceChildren(frag);
 	};
 
+	/* -- the page modal -- */
+
+	/** Every page row rendered this session, so the modal can read one back by url. */
+	const byUrl = new Map<string, PageRow>();
+	let modal: { el: HTMLElement; refs: Record<string, HTMLElement> } | null = null;
+
+	const closeModal = (): void => {
+		modal?.el.remove();
+		modal = null;
+	};
+
+	const selectModalTab = (name: string): void => {
+		if (!modal) return;
+		const m = modal.refs;
+		for (const btn of (m.mtabs as HTMLElement).querySelectorAll("button")) {
+			btn.setAttribute("aria-selected", String(btn.dataset.tab === name));
+		}
+		m.panePreview.hidden = name !== "preview";
+		m.paneSource.hidden = name !== "source";
+		m.paneExtracted.hidden = name !== "extracted";
+	};
+
+	/** Fill the Extracted tab from the row's stored summary and the fresh document. */
+	const renderExtracted = (page: PageRow, data: PageDoc): void => {
+		const m = modal!.refs;
+
+		const stored = m.stored;
+		stored.replaceChildren();
+		if (page.data && Object.keys(page.data).length) {
+			for (const [k, v] of Object.entries(page.data)) {
+				kv(stored, k, Array.isArray(v) ? (v.join(", ") || "—") : v);
+			}
+		} else {
+			kv(stored, "data", "nothing — onPage skipped this page");
+		}
+
+		const fresh = m.fresh;
+		fresh.replaceChildren();
+		const doc = data.doc;
+		if (!doc) {
+			kv(fresh, "extract", "no archived body to extract from");
+			m.markdownSec.hidden = true;
+			m.structuredSec.hidden = true;
+			return;
+		}
+		const md = doc.metadata as Record<string, unknown>;
+		kv(fresh, "title", doc.title);
+		kv(fresh, "lang", doc.lang);
+		kv(fresh, "description", md.description);
+		kv(fresh, "canonical", md.canonical);
+		kv(fresh, "author", md.author);
+		kv(fresh, "publishedAt", md.publishedAt);
+		kv(fresh, "siteName", md.siteName);
+		kv(fresh, "content via", doc.content?.via);
+		kv(fresh, "text length", doc.content?.textLength);
+		kv(
+			fresh,
+			"link density",
+			doc.content ? doc.content.linkDensity.toFixed(3) : null,
+		);
+		kv(fresh, "json-ld blocks", doc.jsonLd.length);
+		kv(fresh, "embedded json", Object.keys(doc.embeddedJson).join(", "));
+		kv(fresh, "microdata items", doc.microdata.length);
+
+		m.markdownSec.hidden = !doc.content;
+		if (doc.content) m.markdown.textContent = doc.content.markdown;
+
+		const structured = {
+			jsonLd: doc.jsonLd,
+			embeddedJson: doc.embeddedJson,
+			microdata: doc.microdata,
+		};
+		const empty = !doc.jsonLd.length && !doc.microdata.length &&
+			!Object.keys(doc.embeddedJson).length;
+		m.structuredSec.hidden = empty;
+		if (!empty) m.structured.textContent = JSON.stringify(structured, null, 2);
+	};
+
+	const openPage = async (pageUrl: string): Promise<void> => {
+		const page = byUrl.get(pageUrl);
+		if (!page) return;
+
+		closeModal();
+		const el = fromTemplate("tpl-modal");
+		modal = { el, refs: refs(el) };
+		const m = modal.refs;
+		r.modalHost.appendChild(el);
+		selectModalTab("preview");
+
+		m.title.textContent = page.title || short(page.finalUrl ?? page.url);
+		m.url.textContent = page.finalUrl ?? page.url;
+		const badge = (text: string, kind = "") => {
+			const b = document.createElement("span");
+			b.className = `badge${kind ? ` badge-${kind}` : ""}`;
+			b.textContent = text;
+			m.badges.appendChild(b);
+		};
+		badge(
+			page.notModified ? "304" : String(page.status ?? page.errorKind ?? "error"),
+			page.ok ? "ok" : "bad",
+		);
+		badge(`depth ${page.depth}`);
+		if (page.contentType) badge(page.contentType.split(";")[0]);
+		if (page.size != null) badge(bytes(page.size));
+
+		m.source.textContent = "Loading…";
+
+		let data: PageDoc;
+		try {
+			const res = await fetch(`/api/page?url=${encodeURIComponent(page.url)}`);
+			data = await res.json() as PageDoc;
+			if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+		} catch (e) {
+			if (modal?.refs === m) m.source.textContent = `Could not load it: ${e}`;
+			return;
+		}
+		// the modal may have been closed or replaced while that was in flight
+		if (modal?.refs !== m) return;
+
+		if (data.html == null) {
+			m.source.textContent =
+				"No body archived for this URL — tick “Archive rendered HTML” and crawl again.";
+			(m.frame as HTMLIFrameElement).removeAttribute("srcdoc");
+			renderExtracted(page, data);
+			return;
+		}
+
+		m.sourceNote.textContent = [
+			`${bytes(data.bytes)} archived`,
+			data.contentType ?? "",
+			data.charset ?? "",
+			data.truncated ? "— shown truncated; extraction saw all of it" : "",
+		].filter(Boolean).join(" · ");
+		m.source.textContent = data.html;
+		(m.frame as HTMLIFrameElement).srcdoc = withBase(
+			data.html,
+			page.finalUrl ?? page.url,
+		);
+		renderExtracted(page, data);
+	};
+
 	/* -- polling -- */
 
 	const showFailure = (message: string): void => {
@@ -532,6 +741,27 @@ const app = createView((track) => {
 	};
 
 	/* -- actions -- */
+
+	/** What this server can actually do — the JS toggle is a lie without Playwright. */
+	const loadCapabilities = async (): Promise<void> => {
+		const caps = await fetch("/api/capabilities")
+			.then((res) => res.json() as Promise<Capabilities>)
+			.catch(() => null);
+		const box = r.js as HTMLInputElement;
+		if (!caps?.browser) {
+			box.checked = false;
+			box.disabled = true;
+			r.jsLabel.textContent = "Render with JS — Playwright not installed";
+			r.jsHint.textContent =
+				"Browser drivers are never a dependency of this package. `deno add npm:playwright` " +
+				"and `deno run -A npm:playwright install chromium` on the server to enable it.";
+			return;
+		}
+		const js = caps.caps.js as { maxPages: number; concurrency: number };
+		r.jsHint.textContent =
+			`With JS on, every document goes through a real browser and the archived body is ` +
+			`the post-JS DOM — so budgets tighten to ${js.maxPages} pages / ${js.concurrency} at a time.`;
+	};
 
 	const loadRecent = async (): Promise<void> => {
 		await fetch("/api/crawls")
@@ -617,7 +847,28 @@ const app = createView((track) => {
 			r.linksBody.className = v ? `only-${v}` : "";
 		},
 		openRun: (_e, target) => watch(target.dataset.mode as Mode, target.dataset.uid!),
+		openPage: (e, target) => {
+			// the row is focusable, so it answers Enter/Space as well as a click
+			if (e.type === "keydown") {
+				const key = (e as KeyboardEvent).key;
+				if (key !== "Enter" && key !== " ") return;
+				e.preventDefault();
+			}
+			void openPage(target.dataset.url!);
+		},
+		mtab: (_e, target) => selectModalTab(target.dataset.tab!),
+		closeModal: () => closeModal(),
+		backdrop: (e, target) => {
+			// only the backdrop itself, never a click that bubbled out of the dialog
+			if (e.target === target) closeModal();
+		},
 	}));
+
+	const onKeydown = (e: KeyboardEvent) => {
+		if (e.key === "Escape" && modal) closeModal();
+	};
+	document.addEventListener("keydown", onKeydown);
+	track(() => document.removeEventListener("keydown", onKeydown));
 
 	// the radios are not `[data-on]` targets (there is nothing to delegate to), so the
 	// hint is kept in sync with a plain listener
@@ -632,6 +883,7 @@ const app = createView((track) => {
 	syncModeHint();
 	reset();
 	r.version.textContent = `· v${VERSION}`;
+	void loadCapabilities();
 	void loadRecent();
 
 	return { el };

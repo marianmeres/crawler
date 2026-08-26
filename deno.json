@@ -43,6 +43,7 @@
 		"@marianmeres/crawler/steve": "./src/steve/mod.ts",
 		"@marianmeres/page-fetcher": "jsr:@marianmeres/page-fetcher@^0.4.0",
 		"@marianmeres/page-fetcher/adapters": "jsr:@marianmeres/page-fetcher@^0.4.0/adapters",
+		"@marianmeres/html-extract": "jsr:@marianmeres/html-extract@^0.5.0",
 		"@marianmeres/npmbuild": "jsr:@marianmeres/npmbuild@^1.16.0",
 		"@marianmeres/vanilla": "jsr:@marianmeres/vanilla@^1.8.0",
 		"@marianmeres/design-tokens/reboot": "jsr:@marianmeres/design-tokens@^1.17.0/reboot",

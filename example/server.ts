@@ -26,6 +26,8 @@
  *   GET  /api/crawl/:mode/:uid      the poll — stats, then the new pages and links
  *   POST /api/crawl/:mode/:uid/stop ask a running crawl to wind down
  *   GET  /api/crawl/:mode/:uid/broken   the broken-link report, once it has ended
+ *   GET  /api/page?url=…            one page's archived HTML + its extracted document
+ *   GET  /api/capabilities          what this server can do (browser? the caps?)
  *   GET  /api/crawls                recent runs, so a reload can pick one back up
  *
  * ⚠️ This crawls whatever URL it is handed. Every budget below is a *server-side*
@@ -37,10 +39,25 @@
 
 import pg from "pg";
 import { extname, fromFileUrl, join, normalize } from "@std/path";
+import { extract } from "@marianmeres/html-extract";
+import { createFetcher } from "@marianmeres/page-fetcher";
+import type { Fetcher } from "@marianmeres/page-fetcher";
+import {
+	createBrowserAdapter,
+	createHttpAdapter,
+	playwrightDriver,
+} from "@marianmeres/page-fetcher/adapters";
+import type { PlaywrightSource } from "@marianmeres/page-fetcher/adapters";
 import { Jobs } from "@marianmeres/steve";
 import type { Job, JobHandler } from "@marianmeres/steve";
 import { createCrawler } from "@marianmeres/crawler";
-import type { CrawlEvents, CrawlOptions, CrawlStats } from "@marianmeres/crawler";
+import type {
+	CrawlEvents,
+	CrawlOptions,
+	CrawlStats,
+	PageContext,
+	PageResult,
+} from "@marianmeres/crawler";
 import { createCrawlerPg } from "@marianmeres/crawler/pg";
 import type { CrawlPersistence, CrawlRow } from "@marianmeres/crawler/pg";
 import {
@@ -77,6 +94,13 @@ const CAPS = {
 	liveDirect: 2,
 	/** Rows returned per poll, per table. */
 	pollRows: 250,
+	/**
+	 * Tighter ceilings while browser rendering is on. A rendered page costs roughly a
+	 * second and a whole browser context, where an HTTP fetch costs neither.
+	 */
+	js: { maxPages: 60, concurrency: 2 },
+	/** Longest archived body shipped to the modal. Extraction still sees all of it. */
+	bodyPreview: 1_500_000,
 } as const;
 
 /**
@@ -94,6 +118,107 @@ const MIME: Record<string, string> = {
 	".json": "application/json; charset=utf-8",
 	".svg": "image/svg+xml",
 };
+
+/* ---- browser rendering ----------------------------------------------------- */
+
+/**
+ * Playwright is **yours**, never this package's: neither the crawler nor page-fetcher
+ * imports a browser. Absent, the UI's "Render with JS" toggle simply disables itself.
+ */
+async function loadPlaywright(): Promise<PlaywrightSource | undefined> {
+	// deliberately not a literal: a static specifier would make playwright something
+	// `deno check` has to resolve, and it is not a dependency of anything here
+	const specifier = "npm:playwright";
+	try {
+		return await import(specifier);
+	} catch {
+		return undefined;
+	}
+}
+
+const playwright = await loadPlaywright();
+
+/** Extensions that are certainly not a document. Rendering a text file helps nobody. */
+const NOT_HTML = /\.(txt|xml|json|css|m?js|png|jpe?g|gif|svg|webp|ico|pdf|zip|gz)($|\?)/i;
+
+/**
+ * One browser fetcher for the whole process, built on first use and disposed at
+ * shutdown — a browser launch costs about a second, so per-crawl instances would be
+ * absurd, and pooled contexts are what the adapter wants anyway.
+ *
+ * The crucial property is on the way out, not in: the adapter returns `page.content()`
+ * **after** the wait strategy resolved, i.e. the serialized post-JS DOM. Those are the
+ * bytes `extractLinks` sees, the bytes `contentHash` covers, and the bytes `persistBody`
+ * archives — which is why the modal can show a rendered page at all.
+ *
+ * robots.txt never reaches this: the engine gives robots its own plain HTTP fetcher.
+ */
+let browserFetcher: Fetcher | undefined;
+
+function renderingFetcher(): Fetcher {
+	browserFetcher ??= createFetcher({
+		// the first adapter is the default route, the rest are reachable by name
+		adapters: [
+			createHttpAdapter(),
+			createBrowserAdapter({
+				driver: playwrightDriver(playwright!),
+				// the default "networkidle" is the only honest strategy here: this demo
+				// does not know the target site, so it cannot name a readiness selector
+				contextStrategy: "pooled",
+			}),
+		],
+		selectAdapter: (req) => NOT_HTML.test(req.url) ? "http" : "browser",
+	});
+	return browserFetcher;
+}
+
+/* ---- crawl-time extraction ------------------------------------------------- */
+
+/**
+ * The crawler/scraper boundary, and it runs right here.
+ *
+ * `onPage`'s return value lands on `PageResult.data` and, through `./pg`, in
+ * `__crawler_page.data` as JSONB — so a summary of every page is queryable without
+ * touching the archive. It stays a *summary* on purpose: the full document (markdown,
+ * JSON-LD, microdata) is re-extracted on demand when the modal opens, which is what
+ * makes changing the extraction a page reload rather than a re-crawl.
+ *
+ * With browser rendering on, the string handed to `extract()` is the post-JS DOM.
+ * `@marianmeres/html-extract` runs no JavaScript itself — it is the document layer over
+ * whatever string the transport produced, and the transport is what decides whether
+ * that string was rendered.
+ */
+async function summarize(res: PageResult, ctx: PageContext): Promise<unknown> {
+	if (!res.ok || !(res.contentType ?? "").includes("html")) return undefined;
+	try {
+		// `PageResult` never carries a body: the bytes live on `ctx.fetchResult`, and
+		// only for as long as this hook runs
+		const html = await ctx.fetchResult?.text();
+		if (!html) return undefined;
+		const doc = extract(html, { url: res.finalUrl || res.url });
+		const text = doc.content?.text() ?? "";
+		return {
+			title: doc.title ?? null,
+			description: doc.metadata.description ?? null,
+			author: doc.metadata.author ?? null,
+			publishedAt: doc.metadata.publishedAt ?? null,
+			/** Which strategy found the main content: semantic | selector | scored. */
+			via: doc.content?.via ?? null,
+			words: text ? text.trim().split(/\s+/).filter(Boolean).length : 0,
+			linkDensity: doc.content?.linkDensity ?? null,
+			jsonLd: doc.jsonLd.length,
+			embeddedJson: Object.keys(doc.embeddedJson),
+			microdata: doc.microdata.length,
+		};
+	} catch {
+		// a hook that throws fails the page, and a summary is never worth that
+		return undefined;
+	}
+}
+
+/** Only documents are worth archiving; a PDF in the URL archive helps nobody. */
+const persistHtmlOnly = (res: PageResult): boolean =>
+	(res.contentType ?? "").includes("html");
 
 /* ---- database -------------------------------------------------------------- */
 
@@ -121,17 +246,29 @@ const crawlerPg = createCrawlerPg({ db, tablePrefix: PREFIX });
  */
 const queueCancels = new Map<string, AbortController>();
 
-const crawlHandler: JobHandler = (job: Job, signal?: AbortSignal) => {
-	const ac = new AbortController();
-	queueCancels.set(job.uid, ac);
-	const run = createCrawlJobHandler({
-		db,
-		pg: { tablePrefix: PREFIX },
-		baseOptions: { signal: ac.signal },
-	});
-	return Promise.resolve(run(job, signal))
-		.finally(() => queueCancels.delete(job.uid));
-};
+/**
+ * A payload is JSONB, so "render this one with a browser" cannot ride in it as a fetcher
+ * — and an unknown key in `payload.options` is dropped with a warning, not honored. The
+ * flag therefore rides on the job **type**, which `startCrawlJob` takes as an option and
+ * steve routes on. Two types, two handlers, one worker.
+ */
+const CRAWL_JS_JOB_TYPE = "crawl-js";
+
+const makeCrawlHandler =
+	(js: boolean): JobHandler => (job: Job, signal?: AbortSignal) => {
+		const ac = new AbortController();
+		queueCancels.set(job.uid, ac);
+		const run = createCrawlJobHandler({
+			db,
+			pg: { tablePrefix: PREFIX, persistBody: persistHtmlOnly },
+			// hooks, events and the fetcher are configured here, code-side: none of them
+			// survives `JSON.stringify` into a payload
+			...(js ? { fetcher: renderingFetcher() } : {}),
+			baseOptions: { signal: ac.signal, onPage: summarize },
+		});
+		return Promise.resolve(run(job, signal))
+			.finally(() => queueCancels.delete(job.uid));
+	};
 
 const jobs = new Jobs({
 	db,
@@ -139,7 +276,10 @@ const jobs = new Jobs({
 	// jobs, and one without the crawl handler noop-completes them — the job reads
 	// `completed` and the crawl never ran. One prefix, one worker, no ambiguity here.
 	tablePrefix: PREFIX,
-	jobHandlers: { [CRAWL_JOB_TYPE]: crawlHandler },
+	jobHandlers: {
+		[CRAWL_JOB_TYPE]: makeCrawlHandler(false),
+		[CRAWL_JS_JOB_TYPE]: makeCrawlHandler(true),
+	},
 	// the default of 5 minutes would expire a healthy crawl, and `expired` is terminal.
 	// Measured from the first attempt's start, so it must cover every attempt plus backoff.
 	autoCleanup: { maxAllowedRunDurationMinutes: 60 },
@@ -163,6 +303,8 @@ interface Requested {
 	sitemaps: boolean;
 	respectRobots: boolean;
 	persistBody: boolean;
+	/** Route every document through a real browser, so the DOM is the post-JS one. */
+	js: boolean;
 }
 
 /** What survived {@linkcode clamp}, plus the human-readable list of what did not. */
@@ -171,6 +313,7 @@ interface Clamped {
 	seeds: string[];
 	mode: "direct" | "queue";
 	persistBody: boolean;
+	js: boolean;
 	notes: string[];
 }
 
@@ -213,9 +356,21 @@ function clamp(body: Partial<Requested>): Clamped {
 		return Math.min(value, max);
 	};
 
+	let js = body.js === true;
+	if (js && !playwright) {
+		notes.push(
+			"browser rendering is off — Playwright is not installed on this server",
+		);
+		js = false;
+	}
+	// a rendered page costs a second and a browser context; an HTTP one costs neither
+	const ceiling = js
+		? { maxPages: CAPS.js.maxPages, concurrency: CAPS.js.concurrency }
+		: { maxPages: CAPS.maxPages, concurrency: CAPS.concurrency };
+
 	const maxPages = cap(
 		Math.max(1, Math.round(num(body.maxPages, 50))),
-		CAPS.maxPages,
+		ceiling.maxPages,
 		"maxPages",
 	);
 	const maxDepth = cap(
@@ -230,7 +385,7 @@ function clamp(body: Partial<Requested>): Clamped {
 	);
 	const concurrency = cap(
 		Math.max(1, Math.round(num(body.concurrency, 4))),
-		CAPS.concurrency,
+		ceiling.concurrency,
 		"concurrency",
 	);
 
@@ -270,7 +425,9 @@ function clamp(body: Partial<Requested>): Clamped {
 		options,
 		seeds,
 		mode: body.mode === "queue" ? "queue" : "direct",
-		persistBody: body.persistBody === true,
+		// default ON: without an archived body the page modal has nothing to show
+		persistBody: body.persistBody !== false,
+		js,
 		notes,
 	};
 }
@@ -301,7 +458,8 @@ async function startDirect(req: Clamped): Promise<string> {
 	const runner = createCrawlerPg({
 		db,
 		tablePrefix: PREFIX,
-		persistBody: req.persistBody,
+		// the predicate arm is the size knob: keep the documents, skip the PDFs
+		persistBody: req.persistBody && persistHtmlOnly,
 	});
 	const run: CrawlPersistence = await runner.createCrawl({
 		seeds: req.seeds,
@@ -319,6 +477,10 @@ async function startDirect(req: Clamped): Promise<string> {
 		...(req.options as CrawlOptions),
 		stores: run.stores,
 		collect: { pages: false, graph: false },
+		// an injected fetcher is never disposed by the engine: this one is process-wide
+		// and goes at shutdown
+		...(req.js ? { fetcher: renderingFetcher() } : {}),
+		onPage: summarize,
 		events,
 	});
 
@@ -433,6 +595,58 @@ async function snapshot(
 	};
 }
 
+/* ---- one page, in full ----------------------------------------------------- */
+
+/** Decode archived bytes with whatever charset they were stored under. */
+function decode(body: Uint8Array, charset?: string): string {
+	try {
+		return new TextDecoder(charset || "utf-8").decode(body);
+	} catch {
+		// an unknown label is a `TextDecoder` throw, not a reason to lose the page
+		return new TextDecoder("utf-8").decode(body);
+	}
+}
+
+/**
+ * The archived bytes of one URL, and the document `@marianmeres/html-extract` makes of
+ * them.
+ *
+ * There is no crawl in this lookup on purpose: the URL archive is keyed **per tenant,
+ * not per crawl**, and outlives every run — it is the same stored body an incremental
+ * re-crawl diffs against. The key is the *normalized* URL, which is exactly the `url`
+ * field of the `PageRow` the browser is holding.
+ *
+ * Extraction happens here, on read, rather than at crawl time: the whole document —
+ * markdown, JSON-LD, microdata — then costs nothing per row, and changing what is
+ * extracted is a page reload instead of a re-crawl. `MainContent.toJSON()` materializes
+ * the lazy renderings, so `JSON.stringify` is not silently lossy.
+ */
+async function pageDocument(url: string): Promise<Record<string, unknown>> {
+	const archived = await crawlerPg.getBody(url);
+	if (!archived) {
+		return { html: null, bytes: 0, truncated: false, doc: null };
+	}
+
+	const html = decode(archived.body, archived.charset);
+	let doc: unknown = null;
+	try {
+		// the whole string, not the truncated one the browser gets
+		doc = extract(html, { url });
+	} catch {
+		doc = null;
+	}
+
+	return {
+		html: html.length > CAPS.bodyPreview ? html.slice(0, CAPS.bodyPreview) : html,
+		bytes: archived.body.byteLength,
+		truncated: html.length > CAPS.bodyPreview,
+		contentType: archived.contentType ?? null,
+		charset: archived.charset ?? null,
+		fetchedAt: archived.fetchedAt,
+		doc,
+	};
+}
+
 /* ---- routes ---------------------------------------------------------------- */
 
 class HttpError extends Error {
@@ -455,18 +669,40 @@ async function api(req: Request, url: URL): Promise<Response> {
 		const request = clamp(body as Partial<Requested>);
 
 		if (request.mode === "queue") {
-			const { uid } = await startCrawlJob(jobs, request.seeds, {
-				...request.options,
-				persistBody: request.persistBody,
-			});
+			const { uid } = await startCrawlJob(
+				jobs,
+				request.seeds,
+				// only the `false` arm goes in the payload: `true` would override the
+				// factory's html-only predicate with a plain boolean
+				request.persistBody ? request.options : {
+					...request.options,
+					persistBody: false,
+				},
+				{ type: request.js ? CRAWL_JS_JOB_TYPE : CRAWL_JOB_TYPE },
+			);
 			return json({ mode: "queue", uid, notes: request.notes });
 		}
 		const uid = await startDirect(request);
 		return json({ mode: "direct", uid, notes: request.notes });
 	}
 
+	// what this particular server can do, so the UI can disable what it cannot
+	if (path === "/api/capabilities" && req.method === "GET") {
+		return json({
+			browser: !!playwright,
+			allowImpolite: ALLOW_IMPOLITE,
+			caps: CAPS,
+		});
+	}
+
+	if (path === "/api/page" && req.method === "GET") {
+		const target = url.searchParams.get("url");
+		if (!target) throw new HttpError(400, "?url= is required");
+		return json(await pageDocument(target));
+	}
+
 	if (path === "/api/crawls" && req.method === "GET") {
-		const rows = await crawlerPg.listCrawls({ limit: 20 });
+		const rows = await crawlerPg.listCrawls({ limit: 10 });
 		return json({
 			crawls: rows.map((c) => ({
 				uid: c.uid,
@@ -559,6 +795,8 @@ const shutdown = async () => {
 	shuttingDown = true;
 	console.log("\nstopping — a queued crawl keeps its place in PG");
 	await jobs.stop().catch(() => {});
+	// this one IS ours to dispose: the engine never disposes an injected fetcher
+	await browserFetcher?.[Symbol.asyncDispose]?.().catch(() => {});
 	await db.end().catch(() => {});
 	Deno.exit(0);
 };

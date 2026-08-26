@@ -2,10 +2,12 @@
  * `persistPage` against a live server: the body-keep/replace matrix of the URL archive,
  * the per-run page row, the link replace and the frontier ack.
  *
- * The body matrix is the reason this suite is long. `__crawler_url.body` is written by a
- * single `CASE` inside an upsert, and every one of its arms — changed hash, identical
- * hash, 304, non-ok, `persistBody` off — is a way to get the wrong bytes into an archive
- * nobody re-reads until an incremental re-crawl months later.
+ * The body matrix is the reason this suite is long. `__crawler_url.body` is written by an
+ * upsert whose every path — bytes in hand, 304, non-ok, `persistBody` off — is a way to
+ * get the wrong bytes into an archive nobody re-reads until an incremental re-crawl
+ * months later. The row has a second writer too (`PgVisitedStore.add`, which updates
+ * `content_hash` outside the transaction), so "the hash is unchanged" never proves "the
+ * bytes are unchanged".
  *
  * Gated on `TEST_PG_DATABASE` only: with the variable set but the server unreachable
  * these tests fail rather than skip.
@@ -128,7 +130,7 @@ pgTest("a changed content hash replaces the archived body", async ({ run, db }) 
 	assertEquals((await one(db, `SELECT count(*)::int AS c FROM ${TABLE_URL}`)).c, 1);
 });
 
-pgTest("an identical hash keeps the stored bytes and only touches fetched_at", async ({
+pgTest("a write that carries bytes replaces the stored ones, hash or no hash", async ({
 	run,
 	db,
 }) => {
@@ -138,16 +140,47 @@ pgTest("an identical hash keeps the stored bytes and only touches fetched_at", a
 	);
 	const first = await one(db, `SELECT * FROM ${TABLE_URL}`);
 
-	// same hash, different bytes: the hash is the truth, the bytes are the ones we keep
+	// Same hash, different bytes. This used to keep "v1" on the theory that an equal
+	// hash proves equal bytes — but this row has a second writer. `PgVisitedStore.add`
+	// stamps the *new* content_hash onto it from outside this transaction, so by the
+	// time the upsert runs the hashes can match for a body that has in fact changed.
+	// A write that has bytes in hand is the truth; only a write without any defers.
 	await run.persistPage(
 		page({ url: URL_A, contentHash: "h1" }),
 		{ fetchResult: makeResult({ url: URL_A, body: "v1-but-different" }) },
 	);
 
 	const second = await one(db, `SELECT * FROM ${TABLE_URL}`);
-	assertEquals(decoder.decode(second.body), "v1");
+	assertEquals(decoder.decode(second.body), "v1-but-different");
 	assert(second.fetched_at > first.fetched_at, "fetched_at must be touched");
 });
+
+pgTest(
+	"the visited store cannot strand a stale body under the current hash",
+	async ({ run, db }) => {
+		// the regression: `visited.add` wins the race against `persistPage`, so the row
+		// already carries the new hash when the upsert that has the new bytes arrives
+		await run.persistPage(
+			page({ url: URL_A, contentHash: "old", contentType: "text/html" }),
+			{ fetchResult: makeResult({ url: URL_A, body: "old-bytes" }) },
+		);
+
+		await run.stores.visited.add(URL_A, { contentHash: "new", status: 200 });
+		assertEquals(
+			(await one(db, `SELECT content_hash FROM ${TABLE_URL}`)).content_hash,
+			"new",
+		);
+
+		await run.persistPage(
+			page({ url: URL_A, contentHash: "new", contentType: "text/html" }),
+			{ fetchResult: makeResult({ url: URL_A, body: "new-bytes" }) },
+		);
+
+		const row = await one(db, `SELECT * FROM ${TABLE_URL}`);
+		assertEquals(decoder.decode(row.body), "new-bytes");
+		assertEquals(row.content_hash, "new");
+	},
+);
 
 pgTest("a 304 keeps the body and the validators, and records the status", async ({
 	run,

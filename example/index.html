@@ -475,6 +475,142 @@
 			display: none;
 		}
 
+		/* ---- modal ---- */
+
+		tbody tr.clickable {
+			cursor: pointer;
+		}
+		tbody tr.clickable:focus-visible {
+			outline: 2px solid var(--stuic-color-primary);
+			outline-offset: -2px;
+		}
+
+		.modal-backdrop {
+			position: fixed;
+			inset: 0;
+			z-index: 50;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			padding: clamp(0.5rem, 3vw, 2rem);
+			background: rgb(0 0 0 / 0.55);
+		}
+		.modal {
+			display: flex;
+			flex-direction: column;
+			width: min(64rem, 100%);
+			max-height: 90vh;
+			border: 1px solid var(--stuic-color-border);
+			border-radius: 0.7rem;
+			background: var(--stuic-color-surface);
+			color: var(--stuic-color-surface-foreground);
+			overflow: hidden;
+		}
+		.modal-head {
+			display: flex;
+			align-items: flex-start;
+			gap: 0.75rem;
+			padding: 0.8rem 1rem;
+			border-bottom: 1px solid var(--stuic-color-border);
+		}
+		.modal-head b {
+			display: block;
+			font-size: 0.92rem;
+			font-weight: 600;
+			line-height: 1.3;
+		}
+		.modal-head small {
+			display: block;
+			margin-top: 0.15rem;
+			color: var(--stuic-color-muted-foreground);
+			font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+			font-size: 0.74rem;
+			overflow-wrap: anywhere;
+		}
+		.modal-close {
+			flex: none;
+			border: 1px solid var(--stuic-color-border);
+			border-radius: 0.4rem;
+			background: var(--stuic-color-background);
+			color: inherit;
+			width: 2rem;
+			height: 2rem;
+			cursor: pointer;
+			line-height: 1;
+		}
+		.modal-close:hover {
+			background: var(--stuic-color-surface-hover);
+		}
+		.modal .tabs {
+			margin: 0 1rem;
+		}
+		.modal-body {
+			flex: 1;
+			overflow: auto;
+			padding: 0.9rem 1rem 1.1rem;
+		}
+
+		.badges {
+			display: flex;
+			flex-wrap: wrap;
+			gap: 0.3rem;
+			margin-top: 0.4rem;
+		}
+
+		.frame {
+			width: 100%;
+			height: 62vh;
+			border: 1px solid var(--stuic-color-border);
+			border-radius: 0.45rem;
+			background: #fff;
+		}
+
+		pre.code {
+			margin: 0;
+			padding: 0.7rem 0.8rem;
+			border: 1px solid var(--stuic-color-border);
+			border-radius: 0.45rem;
+			background: var(--stuic-color-background);
+			font-size: 0.74rem;
+			line-height: 1.5;
+			white-space: pre-wrap;
+			overflow-wrap: anywhere;
+			max-height: 62vh;
+			overflow: auto;
+		}
+
+		.sec {
+			margin-bottom: 1.1rem;
+		}
+		.sec > h3 {
+			margin: 0 0 0.15rem;
+			font-size: 0.74rem;
+			font-weight: 600;
+			text-transform: uppercase;
+			letter-spacing: 0.06em;
+			color: var(--stuic-color-muted-foreground);
+		}
+		.sec > p.note {
+			margin: 0 0 0.5rem;
+			font-size: 0.76rem;
+			color: var(--stuic-color-muted-foreground);
+		}
+		dl.kv {
+			display: grid;
+			grid-template-columns: minmax(6rem, max-content) minmax(0, 1fr);
+			gap: 0.15rem 0.8rem;
+			margin: 0;
+			font-size: 0.79rem;
+		}
+		dl.kv dt {
+			color: var(--stuic-color-muted-foreground);
+		}
+		dl.kv dd {
+			margin: 0;
+			overflow-wrap: anywhere;
+			font-variant-numeric: tabular-nums;
+		}
+
 		.placeholder {
 			margin: 0;
 			padding: 2rem 0;
@@ -512,6 +648,8 @@
 			margin: 0;
 			padding: 0;
 			list-style: none;
+			max-height: 22rem;
+			overflow-y: auto;
 		}
 		.recent button {
 			width: 100%;
@@ -660,10 +798,19 @@
 									Respect robots.txt
 								</label>
 								<label>
-									<input type="checkbox" data-ref="persistBody" />
-									Archive response bodies
+									<input type="checkbox" data-ref="persistBody"
+										checked />
+									Archive rendered HTML
+								</label>
+								<label>
+									<input type="checkbox" data-ref="js" />
+									<span
+										data-ref="jsLabel">Render with JS (browser)</span>
 								</label>
 							</div>
+
+							<p class="muted" data-ref="jsHint"
+								style="margin: 0.1rem 0 0"></p>
 
 							<div class="actions">
 								<button class="primary" type="submit" data-ref="startBtn">
@@ -820,11 +967,88 @@
 						</footer>
 					</div>
 				</div>
+				<div data-ref="modalHost"></div>
+			</div>
+		</template>
+
+		<template id="tpl-modal">
+			<div class="modal-backdrop" data-on="click:backdrop">
+				<div class="modal" role="dialog" aria-modal="true"
+					aria-label="Fetched page">
+					<div class="modal-head">
+						<div style="min-width: 0">
+							<b data-ref="title"></b>
+							<small data-ref="url"></small>
+							<div class="badges" data-ref="badges"></div>
+						</div>
+						<button class="modal-close" type="button" title="Close"
+							data-on="click:closeModal">✕</button>
+					</div>
+
+					<div class="tabs" data-ref="mtabs">
+						<button type="button" data-tab="preview" aria-selected="true"
+							data-on="click:mtab">Preview</button>
+						<button type="button" data-tab="source" aria-selected="false"
+							data-on="click:mtab">HTML source</button>
+						<button type="button" data-tab="extracted" aria-selected="false"
+							data-on="click:mtab">Extracted</button>
+					</div>
+
+					<div class="modal-body">
+						<div data-ref="panePreview">
+							<p class="muted" style="margin: 0 0 0.5rem">
+								The archived DOM, rendered in a sandboxed iframe — no
+								scripts, no same-origin. A <code>&lt;base&gt;</code> is
+								injected so the page's own CSS and images still resolve.
+							</p>
+							<iframe class="frame" data-ref="frame" sandbox=""
+								referrerpolicy="no-referrer"
+								title="Page preview"></iframe>
+						</div>
+
+						<div data-ref="paneSource" hidden>
+							<p class="muted" style="margin: 0 0 0.5rem"
+								data-ref="sourceNote"></p>
+							<pre class="code" data-ref="source"></pre>
+						</div>
+
+						<div data-ref="paneExtracted" hidden>
+							<div class="sec">
+								<h3>At crawl time</h3>
+								<p class="note">
+									What <code>onPage</code> returned, stored on the row as
+									<code>__crawler_page.data</code> — queryable without
+									touching the archive.
+								</p>
+								<dl class="kv" data-ref="stored"></dl>
+							</div>
+
+							<div class="sec">
+								<h3>Now, from the archive</h3>
+								<p class="note">
+									<code>extract()</code> re-run on the stored body, so
+									changing what is extracted is a reload, not a re-crawl.
+								</p>
+								<dl class="kv" data-ref="fresh"></dl>
+							</div>
+
+							<div class="sec" data-ref="markdownSec">
+								<h3>Main content — markdown</h3>
+								<pre class="code" data-ref="markdown"></pre>
+							</div>
+
+							<div class="sec" data-ref="structuredSec">
+								<h3>Structured data</h3>
+								<pre class="code" data-ref="structured"></pre>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		</template>
 
 		<template id="tpl-page-row">
-			<tr>
+			<tr class="clickable" tabindex="0" data-on="click:openPage;keydown:openPage">
 				<td><span class="st" data-ref="status"></span></td>
 				<td class="num" data-ref="depth"></td>
 				<td class="url">

@@ -588,7 +588,14 @@ A control panel for one crawl: paste seed URLs, set the budgets, pick whether th
 runs in-process or as a `./steve` job, and watch it happen — live counters, the pages as
 they land, and the link graph with the reason every skipped edge was skipped. Both
 runners are polled the same way, out of the crawler's own tables, which is exactly how
-you would watch a crawl from another process. See [`example/`](./example).
+you would watch a crawl from another process.
+
+Click any fetched page and you get it back in full: the archived HTML rendered in a
+sandboxed iframe, its raw source, and the document
+[`@marianmeres/html-extract`](https://jsr.io/@marianmeres/html-extract) makes of it.
+Tick **Render with JS** and the crawl routes through a Playwright browser adapter, so
+those archived bytes are the post-JS DOM — the SPA case, end to end. See
+[`example/`](./example).
 
 ### The recipes
 

@@ -98,12 +98,13 @@ export async function persistPage(
 						content_hash, last_status, size, fetched_at)
 					VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NOW())
 					ON CONFLICT (tenant_id, url) DO UPDATE SET
-						body = CASE
-							WHEN EXCLUDED.body IS NULL THEN ${tableUrl}.body
-							WHEN ${tableUrl}.body IS NOT NULL
-								AND ${tableUrl}.content_hash
-									IS NOT DISTINCT FROM EXCLUDED.content_hash
-							THEN ${tableUrl}.body ELSE EXCLUDED.body END,
+						-- a write that HAS a body is the truth about this URL; only a
+						-- write without one falls back to what is stored. This must not
+						-- be conditioned on the hashes matching: the visited store
+						-- stamps the *new* content_hash onto this same row from outside
+						-- the transaction, and racing it would keep the previous body
+						-- under the current hash.
+						body = COALESCE(EXCLUDED.body, ${tableUrl}.body),
 						content_type  = COALESCE(EXCLUDED.content_type, ${tableUrl}.content_type),
 						charset       = COALESCE(EXCLUDED.charset, ${tableUrl}.charset),
 						etag          = COALESCE(EXCLUDED.etag, ${tableUrl}.etag),
