@@ -32,5 +32,7 @@ export type {
 	CrawlStatus,
 } from "./crawler-pg.ts";
 
+export type { ArchivedBody, BrokenLink, ChangedUrl, LinkRow, PageRow } from "./query.ts";
+
 // so a consumer can type a logger without importing page-fetcher themselves
 export type { Logger } from "../types.ts";

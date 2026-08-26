@@ -29,6 +29,8 @@ import {
 	type CrawlerTableNames,
 } from "./_schema.ts";
 import { isPool, type Queryable, withTransaction } from "./utils/with-transaction.ts";
+import * as query from "./query.ts";
+import type { ArchivedBody, BrokenLink, ChangedUrl, LinkRow, PageRow } from "./query.ts";
 
 /** The tenant every row falls into when the consumer is not multi-tenant. */
 export const DEFAULT_TENANT_ID = "_default";
@@ -221,7 +223,7 @@ class CrawlHandle implements CrawlPersistence {
 					RETURNING *`,
 				[this.#row.id, JSON.stringify(stats)],
 			);
-			if (rows[0]) this.#row = toCrawlRow(rows[0]);
+			if (rows[0]) this.#row = query._toCrawlRow(rows[0]);
 		} catch (e) {
 			this.#ctx.logger?.warn(`Crawl progress write failed: ${e}`);
 		}
@@ -247,7 +249,7 @@ class CrawlHandle implements CrawlPersistence {
 				RETURNING *`,
 			[this.#row.id],
 		);
-		this.#row = toCrawlRow(rows[0]);
+		this.#row = query._toCrawlRow(rows[0]);
 	}
 
 	async markEnded(end: {
@@ -278,7 +280,7 @@ class CrawlHandle implements CrawlPersistence {
 				finalStats ? JSON.stringify(finalStats) : null,
 			],
 		);
-		this.#row = toCrawlRow(rows[0]);
+		this.#row = query._toCrawlRow(rows[0]);
 	}
 }
 
@@ -370,7 +372,7 @@ export class CrawlerPg {
 				input.jobUid ?? null,
 			],
 		);
-		return new CrawlHandle(this.#ctx, toCrawlRow(rows[0]));
+		return new CrawlHandle(this.#ctx, query._toCrawlRow(rows[0]));
 	}
 
 	/**
@@ -392,7 +394,7 @@ export class CrawlerPg {
 		if (!rows.length) {
 			throw new Error(`Crawl '${uid}' not found (tenant '${this.#tenantId}')`);
 		}
-		const row = toCrawlRow(rows[0]);
+		const row = query._toCrawlRow(rows[0]);
 		await this.#query(
 			`UPDATE ${this.#tableNames.tableFrontier}
 				SET status = 'pending', claimed_at = NULL
@@ -400,6 +402,160 @@ export class CrawlerPg {
 			[row.id],
 		);
 		return new CrawlHandle(this.#ctx, row);
+	}
+
+	// -------------------------------------------------------------------------------
+	// reporting — see `./query.ts`
+	// -------------------------------------------------------------------------------
+
+	/** One crawl by its `uid`, or `null`. */
+	getCrawl(uid: string): Promise<CrawlRow | null> {
+		return query.getCrawl(this.#ctx, uid);
+	}
+
+	/**
+	 * The crawl a `@marianmeres/steve` job produced, or `null`. This is the job-mode
+	 * bridge: a retried attempt looks its predecessor up here and resumes it instead of
+	 * starting over. The newest wins if a job somehow created more than one.
+	 */
+	getCrawlByJobUid(jobUid: string): Promise<CrawlRow | null> {
+		return query.getCrawlByJobUid(this.#ctx, jobUid);
+	}
+
+	/** This tenant's crawls, newest first. */
+	listCrawls(
+		opts?: { status?: CrawlStatus; limit?: number; offset?: number },
+	): Promise<CrawlRow[]> {
+		return query.listCrawls(this.#ctx, opts);
+	}
+
+	/**
+	 * Just the `stats` JSONB — the cheap poll for watching a running crawl from another
+	 * process. `{}` until the first progress write lands, `null` when there is no such
+	 * crawl.
+	 */
+	crawlStats(uid: string): Promise<Partial<CrawlStats> | null> {
+		return query.crawlStats(this.#ctx, uid);
+	}
+
+	/**
+	 * The pages of one crawl, in discovery order.
+	 *
+	 * `skipped` filters on `skip_reason`, which is a *policy* skip; a page that was
+	 * fetched and failed is `ok: false` with no skip reason. Pagination defaults to 100
+	 * and is capped at 1000.
+	 */
+	listPages(
+		uid: string,
+		opts?: {
+			ok?: boolean;
+			status?: number | number[];
+			notModified?: boolean;
+			skipped?: boolean;
+			limit?: number;
+			offset?: number;
+		},
+	): Promise<PageRow[]> {
+		return query.listPages(this.#ctx, uid, opts);
+	}
+
+	/**
+	 * Sugar for {@linkcode CrawlerPg.listPages} with `ok: false, skipped: false` — the
+	 * pages that were actually attempted and did not work out (transport errors and bad
+	 * statuses), never the ones policy declined to fetch.
+	 */
+	listFailed(
+		uid: string,
+		opts?: { limit?: number; offset?: number },
+	): Promise<PageRow[]> {
+		return query.listFailed(this.#ctx, uid, opts);
+	}
+
+	/** The link graph of one crawl, in discovery order — followed edges and skipped ones. */
+	listLinks(
+		uid: string,
+		opts?: {
+			kind?: "internal" | "external";
+			rel?: string;
+			followed?: boolean;
+			skipReason?: string;
+			toUrl?: string;
+			limit?: number;
+			offset?: number;
+		},
+	): Promise<LinkRow[]> {
+		return query.listLinks(this.#ctx, uid, opts);
+	}
+
+	/**
+	 * Dead targets of this run, each with the pages that link to it, worst first.
+	 *
+	 * Only targets that were **visited in this same run** can appear, so what the crawl
+	 * covered decides what this can report: `assets: true` to see broken images and
+	 * stylesheets, `checkExternal: true` to see dead outbound links.
+	 */
+	brokenLinks(uid: string): Promise<BrokenLink[]> {
+		return query.brokenLinks(this.#ctx, uid);
+	}
+
+	/**
+	 * The archived bytes of one URL, or `null` when nothing is stored for it.
+	 *
+	 * The lookup is an exact match against the **normalized** URL, which this method
+	 * cannot reproduce from a raw input — normalization is per-crawl and its options are
+	 * not known here. Pass the `url` field of a `PageRow` or a `PageResult`.
+	 */
+	getBody(url: string): Promise<ArchivedBody | null> {
+		return query.getBody(this.#ctx, url);
+	}
+
+	/**
+	 * What this run saw that the previous one did not, by comparing per-run content
+	 * hashes. `against` names the baseline run's `uid`; the default is this tenant's
+	 * latest earlier `completed` crawl, and with no such run every URL reads as `"new"`.
+	 *
+	 * `"removed"` means "not in this run" — a narrowed scope, a lowered `maxDepth` or a
+	 * budget that stopped the crawl early produce it just as a deleted page does.
+	 */
+	listChanged(uid: string, opts?: { against?: string }): Promise<ChangedUrl[]> {
+		return query.listChanged(this.#ctx, uid, opts);
+	}
+
+	/**
+	 * Deletes one crawl and, by cascade, its pages, links and frontier rows. The URL
+	 * archive is untouched: it is keyed per tenant, not per crawl, and outlives every run
+	 * — {@linkcode CrawlerPg.pruneUrls} is what shrinks it.
+	 */
+	deleteCrawl(uid: string): Promise<boolean> {
+		return query.deleteCrawl(this.#ctx, uid);
+	}
+
+	/**
+	 * Rebuilds a crawl's counters from its persisted page, link and frontier rows and
+	 * force-writes them into the `stats` column, past any live throttle.
+	 *
+	 * Job mode calls this at the start of a resumed attempt, so that `onProgress` deltas
+	 * count on from what is actually stored instead of from the snapshot the crashed
+	 * attempt happened to leave behind. Two fields the engine keeps in memory cannot be
+	 * rebuilt and are absent: `byHost` and `eta`. `skipped`/`skippedByReason` come from
+	 * the persisted edges, so a skip with no source page — a rejected seed, a sitemap URL
+	 * — is not counted.
+	 */
+	recomputeStats(uid: string): Promise<CrawlStats> {
+		return query.recomputeStats(this.#ctx, uid);
+	}
+
+	/**
+	 * Deletes archived URLs, returning how many. **This is the only method in the package
+	 * that destroys data**, so it refuses a call with no filter; pass `olderThan` (a
+	 * `Date` or epoch ms, compared against `fetched_at`), a `host`, or both.
+	 *
+	 * A pruned body makes the next re-crawl of that URL unconditional: conditional
+	 * headers are only sent where a body is stored, so the page comes back in full and
+	 * costs the bandwidth once more.
+	 */
+	pruneUrls(filter: { olderThan?: Date | number; host?: string }): Promise<number> {
+		return query.pruneUrls(this.#ctx, filter);
 	}
 
 	/** Drops and recreates every table. Destroys all data — this is a test convenience. */
@@ -427,24 +583,4 @@ export class CrawlerPg {
 /** Factory alias for {@linkcode CrawlerPg}, so the package reads like its siblings. */
 export function createCrawlerPg(options: CrawlerPgOptions): CrawlerPg {
 	return new CrawlerPg(options);
-}
-
-// deno-lint-ignore no-explicit-any -- a pg result row is untyped by construction
-function toCrawlRow(row: any): CrawlRow {
-	return {
-		id: row.id,
-		uid: row.uid,
-		tenantId: row.tenant_id,
-		seeds: row.seeds ?? [],
-		options: row.options ?? {},
-		status: row.status,
-		stats: row.stats ?? {},
-		stoppedBy: row.stopped_by,
-		error: row.error,
-		jobUid: row.job_uid,
-		startedAt: row.started_at,
-		endedAt: row.ended_at,
-		createdAt: row.created_at,
-		updatedAt: row.updated_at,
-	};
 }
