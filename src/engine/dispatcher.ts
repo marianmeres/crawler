@@ -63,6 +63,8 @@ import { evaluateScope, isOnSeedSite } from "./scope.ts";
 import type { ScopeContext } from "./scope.ts";
 import { createStatsCounter, safeEmit } from "./stats.ts";
 import type { StatsCounter } from "./stats.ts";
+import { createTrapTracker, detectUrlTrap } from "./traps.ts";
+import type { TrapTracker } from "./traps.ts";
 
 /** Content types the engine will look for links in. Anything else is fetched, not read. */
 const HTML_CONTENT_TYPES: ReadonlySet<string> = new Set([
@@ -127,6 +129,8 @@ export class CrawlEngine {
 
 	#channel: Channel<PageResult> | undefined;
 	#stats: StatsCounter;
+	/** Per-run trap counters. In memory even in PG mode — see `./traps.ts`. */
+	readonly #traps: TrapTracker;
 	/** Built at `run()`, once the transport it may borrow is known. */
 	#robots: RobotsGate | undefined;
 
@@ -181,6 +185,7 @@ export class CrawlEngine {
 		this.#frontier = this.#opts.stores.frontier ?? createMemoryFrontier();
 		this.#visited = this.#opts.stores.visited ?? createMemoryVisited();
 		this.#stats = createStatsCounter(this.crawlId, { maxPages: this.#opts.maxPages });
+		this.#traps = createTrapTracker(this.#opts.traps, this.#opts.logger);
 
 		const extract = this.#opts.extract;
 		this.#extractAll = { ...extract };
@@ -768,6 +773,10 @@ export class CrawlEngine {
 
 		let bytes: Uint8Array | undefined;
 		let html: string | undefined;
+		// `true` once this body has been seen more often than `traps.softDupThreshold`
+		// allows: the page is still fetched, delivered and reported, it is simply no
+		// longer a source of new work
+		let softDup = false;
 
 		if (error === undefined && fetchResult !== undefined) {
 			// `X-Robots-Tag` applies to every response, not only to documents — a PDF
@@ -779,6 +788,7 @@ export class CrawlEngine {
 				if (fetchResult.hasBody) {
 					bytes = await fetchResult.bytes();
 					result.contentHash = await sha256Hex(bytes);
+					softDup = this.#traps.countHash(result.contentHash, result.url);
 					if (
 						!checkOnly &&
 						HTML_CONTENT_TYPES.has(fetchResult.contentType ?? "")
@@ -787,7 +797,14 @@ export class CrawlEngine {
 					}
 				}
 				if (html !== undefined) {
-					await this.#readDocument(result, item, html, fetchResult, header);
+					await this.#readDocument(
+						result,
+						item,
+						html,
+						fetchResult,
+						header,
+						softDup,
+					);
 				} else {
 					applyRobots(result, header);
 				}
@@ -933,6 +950,7 @@ export class CrawlEngine {
 		html: string,
 		fetchResult: FetchResult,
 		header: RobotsDirectives,
+		softDup: boolean,
 	): Promise<void> {
 		result.title = extractTitle(html);
 		// `<meta name=robots>` merged with `X-Robots-Tag`, most-restrictive-wins
@@ -978,13 +996,14 @@ export class CrawlEngine {
 			];
 		}
 
-		await this.#processLinks(result, item, raw);
+		await this.#processLinks(result, item, raw, softDup);
 	}
 
 	async #processLinks(
 		result: PageResult,
 		item: FrontierItem,
 		raw: RawLink[],
+		softDup: boolean,
 	): Promise<void> {
 		const from = item.url;
 		const base = result.finalUrl;
@@ -1012,6 +1031,7 @@ export class CrawlEngine {
 				depth: item.depth,
 				regionsPresent,
 				pageNofollow,
+				softDup,
 			});
 			result.links.push(record);
 			if (this.#opts.collect.graph) this.#graph.push(record);
@@ -1039,6 +1059,8 @@ export class CrawlEngine {
 			depth: number;
 			regionsPresent: boolean;
 			pageNofollow: boolean;
+			/** This page's body is a known soft-duplicate: it expands into nothing. */
+			softDup: boolean;
 		},
 	): Promise<LinkRecord> {
 		const resolved = link.url;
@@ -1100,6 +1122,14 @@ export class CrawlEngine {
 			return record;
 		}
 
+		// a soft-duplicate page is checked first, and without touching the per-path
+		// counters: its links were never candidates, so letting them consume a path's
+		// budget would make a soft-404 farm poison the paths it points at
+		if (page.softDup || this.#isTrap(to)) {
+			record.skipReason = "trap";
+			return record;
+		}
+
 		if (!this.#opts.recrawl && await this.#visited.has(to)) {
 			record.skipReason = "duplicate";
 			return record;
@@ -1127,6 +1157,20 @@ export class CrawlEngine {
 		if (outcome === "pushed") record.followed = true;
 		else record.skipReason = outcome;
 		return record;
+	}
+
+	/**
+	 * Both halves of {@linkcode "./traps.ts"}, in the order that keeps the counters
+	 * honest: a URL whose *shape* is already a trap is never counted against its path.
+	 *
+	 * Deliberately not applied to seeds or to `add()`: those are instructions, not
+	 * discoveries, and a crawl that refused the URL it was pointed at would be
+	 * inexplicable.
+	 */
+	#isTrap(url: string): boolean {
+		const parsed = new URL(url);
+		if (detectUrlTrap(parsed, this.#opts.traps)) return true;
+		return this.#traps.checkAndCount(parsed);
 	}
 
 	// -------------------------------------------------------------------------------
