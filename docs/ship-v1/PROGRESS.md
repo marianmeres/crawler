@@ -87,11 +87,11 @@ Branch: `sprint-04-steve`
 |--------|----|------|------|--------|--------|
 | ✅ | T28 | — | `./steve` scaffold + payload/result types | [03](./03-job-mode.md) T28 | 735b4f6 |
 | ✅ | T29 | T20 T22 T23 T28 | `createCrawlJobHandler` factory | [03](./03-job-mode.md) T29 | d54b61b |
-| ✅ | T32 | T29 | AbortSignal wiring | [03](./03-job-mode.md) T32 | — |
-| ✅ | T30 | T25 T29 | Failure semantics + crash-resume on retry | [03](./03-job-mode.md) T30 | — |
-| ✅ | T31 | T28 | Enqueue + status helpers | [03](./03-job-mode.md) T31 | — |
-| ✅ | T33 | T29 T31 | Reaper, listing-window and claiming guidance | [03](./03-job-mode.md) T33 | — |
-| ✅ | T34 | T29 T30 T31 | Steve integration tests + e2e | [03](./03-job-mode.md) T34 | — |
+| ✅ | T32 | T29 | AbortSignal wiring | [03](./03-job-mode.md) T32 | 1cca1fa |
+| ✅ | T30 | T25 T29 | Failure semantics + crash-resume on retry | [03](./03-job-mode.md) T30 | ccc632a |
+| ✅ | T31 | T28 | Enqueue + status helpers | [03](./03-job-mode.md) T31 | 564da81 |
+| ✅ | T33 | T29 T31 | Reaper, listing-window and claiming guidance | [03](./03-job-mode.md) T33 | 36868d7 |
+| ✅ | T34 | T29 T30 T31 | Steve integration tests + e2e | [03](./03-job-mode.md) T34 | 046ac9f |
 
 Job mode always runs on PG stores, so this sprint cannot start before sprint 3 is merged.
 T33 is documentation, and it is documentation on purpose: both failures it prevents — a
@@ -104,9 +104,9 @@ Branch: `sprint-05-release`
 
 | Status | ID | Deps | Task | Source | Commit |
 |--------|----|------|------|--------|--------|
-| ✅ | T35 | T20 T28 | npm build: entry points + real dependency list | [04](./04-packaging-docs-release.md) T35 | — |
-| ✅ | T36 | T26 T29 | Recipes / examples dir (6 recipes) | [04](./04-packaging-docs-release.md) T36 | — |
-| ✅ | T37 | T33 T36 | README + AGENTS.md + `.env.example` | [04](./04-packaging-docs-release.md) T37 | — |
+| ✅ | T35 | T20 T28 | npm build: entry points + real dependency list | [04](./04-packaging-docs-release.md) T35 | a53948e |
+| ✅ | T36 | T26 T29 | Recipes / examples dir (6 recipes) | [04](./04-packaging-docs-release.md) T36 | 1f2d57d |
+| ✅ | T37 | T33 T36 | README + AGENTS.md + `.env.example` | [04](./04-packaging-docs-release.md) T37 | d3b3e83 |
 | ⬜ | T38 | T35 T37 | Release checklist + dry runs | [04](./04-packaging-docs-release.md) T38 | — |
 
 T38 ends at the checklist and the dry runs. The publish itself (`deno task rp` → JSR + npm)
