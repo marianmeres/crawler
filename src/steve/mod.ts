@@ -17,6 +17,9 @@
 export { createCrawlJobHandler } from "./handler.ts";
 export type { CreateCrawlJobHandlerOptions } from "./handler.ts";
 
+export { startCrawlJob } from "./start.ts";
+export type { StartCrawlJobOptions } from "./start.ts";
+
 export { CRAWL_JOB_TYPE } from "./types.ts";
 
 export type {

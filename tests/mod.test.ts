@@ -91,6 +91,7 @@ Deno.test("pg/mod.ts — exports exactly the documented runtime surface", () => 
 const STEVE_EXPORTS = [
 	"CRAWL_JOB_TYPE",
 	"createCrawlJobHandler",
+	"startCrawlJob",
 ];
 
 Deno.test("steve/mod.ts — exports exactly the documented runtime surface", () => {
