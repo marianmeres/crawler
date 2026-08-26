@@ -107,7 +107,7 @@ Branch: `sprint-05-release`
 | ✅ | T35 | T20 T28 | npm build: entry points + real dependency list | [04](./04-packaging-docs-release.md) T35 | a53948e |
 | ✅ | T36 | T26 T29 | Recipes / examples dir (6 recipes) | [04](./04-packaging-docs-release.md) T36 | 1f2d57d |
 | ✅ | T37 | T33 T36 | README + AGENTS.md + `.env.example` | [04](./04-packaging-docs-release.md) T37 | d3b3e83 |
-| ✅ | T38 | T35 T37 | Release checklist + dry runs | [04](./04-packaging-docs-release.md) T38 | — |
+| ✅ | T38 | T35 T37 | Release checklist + dry runs | [04](./04-packaging-docs-release.md) T38 | 208512b |
 
 T38 ends at the checklist and the dry runs. The publish itself (`deno task rp` → JSR + npm)
 is yours, not the driver's.
