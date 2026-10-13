@@ -76,6 +76,12 @@ if (import.meta.main) {
 
 	for (;;) {
 		const { job } = await jobs.find(uid); // coarse: the queue's view
+		// steve answers "no such job" with `undefined`, never a throw. Nothing here purges
+		// the queue, so it means someone else did — and there is nothing left to watch
+		if (!job) {
+			console.log(`job ${uid} is gone from the queue`);
+			break;
+		}
 		const crawl = await crawlerPg.getCrawlByJobUid(uid); // fine: live, mid-run
 		const { done = 0, queued = 0, failed = 0 } = crawl?.stats ?? {};
 		console.log(`${job.status}\tdone=${done} queued=${queued} failed=${failed}`);

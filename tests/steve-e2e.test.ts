@@ -20,7 +20,7 @@
  */
 
 import { assert, assertEquals, assertFalse } from "@std/assert";
-import { Jobs } from "@marianmeres/steve";
+import { type Job, Jobs } from "@marianmeres/steve";
 import { createPg } from "./_pg.ts";
 import { recordingLogger, SITE, siteFetch, SMALL_SITE } from "./_helpers.ts";
 import {
@@ -70,6 +70,19 @@ async function until<T>(
 	}
 }
 
+/**
+ * The job row, which must exist.
+ *
+ * steve reports a uid it cannot find as `job: undefined` rather than throwing. Here that is
+ * never a state to wait out — the job was just created — so it fails on the spot instead of
+ * surfacing 15 seconds later as a timeout.
+ */
+async function findJob(jobs: Jobs, uid: string): Promise<Job> {
+	const { job } = await jobs.find(uid);
+	assert(job, `steve has no job ${uid}`);
+	return job;
+}
+
 Deno.test({
 	name: "pg: a crawl enqueued as a steve job is claimed, run and summarized",
 	ignore: !hasPg,
@@ -109,13 +122,13 @@ Deno.test({
 			// one attempt: a retry would paper over a handler that threw
 			{ max_attempts: 1 },
 		);
-		assertEquals((await jobs.find(uid)).job.status, "pending");
+		assertEquals((await findJob(jobs, uid)).status, "pending");
 		assertEquals(fetcher.calls, []);
 
 		await jobs.start(1);
 
 		const job = await until(
-			async () => (await jobs.find(uid)).job,
+			() => findJob(jobs, uid),
 			(j) => TERMINAL.includes(j.status),
 			"the crawl job to reach a terminal state",
 		);
