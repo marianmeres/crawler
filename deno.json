@@ -1,6 +1,6 @@
 {
 	"name": "@marianmeres/crawler",
-	"version": "0.2.0",
+	"version": "0.3.0",
 	"exports": {
 		".": "./src/mod.ts",
 		"./url": "./src/url/mod.ts",
@@ -55,7 +55,9 @@
 		"@std/fs": "jsr:@std/fs@^1.0.24",
 		"@std/path": "jsr:@std/path@^1.1.6"
 	},
-	"exclude": ["example/dist"],
+	"exclude": [
+		"example/dist"
+	],
 	"fmt": {
 		"useTabs": true,
 		"lineWidth": 90,
@@ -69,6 +71,8 @@
 		]
 	},
 	"minimumDependencyAge": {
-		"exclude": ["jsr:@marianmeres/*"]
+		"exclude": [
+			"jsr:@marianmeres/*"
+		]
 	}
 }
